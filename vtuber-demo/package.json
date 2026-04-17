@@ -1,0 +1,12 @@
+{
+  "name": "vtuber-demo",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "VTuber motion capture demo with MediaPipe and Kalidokit",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "dependencies": {
+    "kalidokit": "^1.1.5"
+  }
+}

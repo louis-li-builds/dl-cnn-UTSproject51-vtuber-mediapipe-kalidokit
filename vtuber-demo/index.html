@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VTuber Demo</title>
+  <script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/",
+    "@pixiv/three-vrm": "https://cdn.jsdelivr.net/npm/@pixiv/three-vrm@3/lib/three-vrm.module.min.js"
+  }
+}
+</script>
+  <style>
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: #111;
+      color: #eee;
+      overflow: hidden;
+    }
+
+    #app {
+      height: 100vh;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      flex-shrink: 0;
+      padding: 16px 20px;
+      border-bottom: 1px solid #333;
+    }
+
+    main {
+      flex: 1;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: 1fr 1fr;
+      gap: 16px;
+      padding: 16px;
+      overflow: hidden;
+    }
+
+    .panel {
+      border: 1px solid #333;
+      border-radius: 10px;
+      padding: 12px;
+      background: #1a1a1a;
+      min-height: 0;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel h2 {
+      flex-shrink: 0;
+      margin-top: 0;
+      margin-bottom: 8px;
+      font-size: 18px;
+    }
+
+    .panel > *:not(h2) {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow: auto;
+    }
+
+    footer {
+      flex-shrink: 0;
+      padding: 12px 20px;
+      border-top: 1px solid #333;
+      color: #aaa;
+      font-size: 14px;
+    }
+
+    #status {
+      color: #7CFC98;
+      font-weight: bold;
+    }
+
+    #log {
+      white-space: pre-wrap;
+      font-family: monospace;
+      font-size: 12px;
+      color: #ccc;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <header>
+      <h1>VTuber Motion Capture Demo</h1>
+      <div>Status: <span id="status">Loading...</span></div>
+    </header>
+
+    <main>
+      <section class="panel" id="input-panel">
+        <h2>Input / Tracking Area</h2>
+        <p>Webcam feed and landmark overlay (MediaPipe Holistic).</p>
+      </section>
+
+      <section class="panel" id="avatar-panel">
+        <h2>Avatar Area</h2>
+        <p>VRM avatar driven by estimated pose and face parameters.</p>
+      </section>
+
+      <section class="panel" id="motion-panel">
+        <h2>Motion Parameters</h2>
+        <p>Live motion and tracking metrics.</p>
+      </section>
+
+      <section class="panel" id="debug-panel">
+        <h2>Log</h2>
+        <div id="log">Initializing…</div>
+      </section>
+    </main>
+
+    <footer>
+      Deep learning course demo: holistic tracking, motion solving, and VRM retargeting.
+    </footer>
+  </div>
+
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
