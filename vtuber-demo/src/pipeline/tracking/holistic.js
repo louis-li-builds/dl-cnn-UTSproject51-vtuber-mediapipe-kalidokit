@@ -16,10 +16,14 @@ function createOverlayCanvas(stage) {
   canvas.style.left = "0";
   canvas.style.pointerEvents = "none";
   canvas.style.borderRadius = "10px";
-  canvas.style.transform = "scaleX(-1)";
+  canvas.style.transform = "";
 
   stage.appendChild(canvas);
   return canvas;
+}
+
+function setOverlayMirrorStyle(canvas, mirrorInference) {
+  canvas.style.transform = mirrorInference ? "" : "scaleX(-1)";
 }
 
 function resizeCanvasToVideo(canvas, video, stage) {
@@ -55,13 +59,32 @@ function drawPoints(ctx, landmarks, color, radius = 2) {
   }
 }
 
+/** Draw video flipped horizontally so model input matches CSS-mirrored preview. */
+function drawVideoHorizontallyFlipped(ctx, video, tw, th) {
+  ctx.save();
+  ctx.translate(tw, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(video, 0, 0, tw, th);
+  ctx.restore();
+}
+
+function mergeTrackingOpts(trackingOptions, getTrackingOptions) {
+  const base =
+    typeof trackingOptions === "object" && trackingOptions ? trackingOptions : {};
+  const fromFn =
+    typeof getTrackingOptions === "function" ? getTrackingOptions() : {};
+  return { ...base, ...fromFn };
+}
+
 /**
  * @param {object} options
  * @param {HTMLVideoElement} options.video
  * @param {HTMLElement} options.stage
  * @param {(s: string) => void} [options.onLog]
  * @param {(trackingResult: object) => void} [options.onFrame]
- * @param {number} [options.detectMaxWidth] if > 0, run Holistic on a downscaled canvas (same aspect as video) for speed/stability
+ * @param {number} [options.detectMaxWidth] if > 0, run Holistic on a downscaled canvas
+ * @param {object} [options.trackingOptions] defaults for `buildTrackingResult` + mirror flags
+ * @param {() => object} [options.getTrackingOptions] per-frame overrides (e.g. from demo-config)
  */
 export async function initHolisticTracking({
   video,
@@ -69,11 +92,13 @@ export async function initHolisticTracking({
   onLog,
   onFrame,
   detectMaxWidth = 0,
+  trackingOptions = {},
+  getTrackingOptions,
 }) {
   if (!video) throw new Error("Video element is required.");
   if (!stage) throw new Error("Tracking stage is required.");
 
-  const vision = await import(TASKS_VISION_URL);
+  const vision = await import(/* @vite-ignore */ TASKS_VISION_URL);
   const { FilesetResolver, HolisticLandmarker } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(WASM_ROOT);
@@ -100,6 +125,9 @@ export async function initHolisticTracking({
     ? detectCanvas.getContext("2d", { willReadFrequently: true })
     : null;
 
+  let flipFullCanvas = null;
+  let flipFullCtx = null;
+
   let lastVideoTime = -1;
   let rafId = null;
 
@@ -115,6 +143,12 @@ export async function initHolisticTracking({
       lastVideoTime = video.currentTime;
 
       const nowMs = performance.now();
+      const opts = mergeTrackingOpts(trackingOptions, getTrackingOptions);
+      const mirrorInference = opts.mirrorInference !== false;
+      const buildOpts = { swapHandSides: Boolean(opts.swapHandSides) };
+
+      setOverlayMirrorStyle(canvas, mirrorInference);
+
       let detectSource = video;
 
       if (
@@ -133,12 +167,37 @@ export async function initHolisticTracking({
           detectCanvas.width = tw;
           detectCanvas.height = th;
         }
-        detectCtx.drawImage(video, 0, 0, tw, th);
+        if (mirrorInference) {
+          drawVideoHorizontallyFlipped(detectCtx, video, tw, th);
+        } else {
+          detectCtx.drawImage(video, 0, 0, tw, th);
+        }
         detectSource = detectCanvas;
+      } else if (
+        mirrorInference &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0
+      ) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        if (
+          !flipFullCanvas ||
+          flipFullCanvas.width !== vw ||
+          flipFullCanvas.height !== vh
+        ) {
+          flipFullCanvas = document.createElement("canvas");
+          flipFullCanvas.width = vw;
+          flipFullCanvas.height = vh;
+          flipFullCtx = flipFullCanvas.getContext("2d", {
+            willReadFrequently: true,
+          });
+        }
+        drawVideoHorizontallyFlipped(flipFullCtx, video, vw, vh);
+        detectSource = flipFullCanvas;
       }
 
       const rawResult = holisticLandmarker.detectForVideo(detectSource, nowMs);
-      const trackingResult = buildTrackingResult(rawResult, nowMs);
+      const trackingResult = buildTrackingResult(rawResult, nowMs, buildOpts);
 
       const face = trackingResult.face.landmarks;
       const pose = trackingResult.pose.landmarks;
@@ -160,10 +219,12 @@ export async function initHolisticTracking({
         const det =
           detectSource === video
             ? `${video.videoWidth}×${video.videoHeight}`
-            : `${detectCanvas.width}×${detectCanvas.height} (maxW=${detectMaxWidth})`;
+            : detectSource === flipFullCanvas
+              ? `${flipFullCanvas.width}×${flipFullCanvas.height} (mirror full)`
+              : `${detectCanvas.width}×${detectCanvas.height} (maxW=${detectMaxWidth})`;
         onLog(
           "Holistic tracking active.\n" +
-            `Detection source: ${det}\n` +
+            `Detection source: ${det} mirrorInference=${mirrorInference}\n` +
             `Face landmarks: ${face.length}\n` +
             `Pose landmarks: ${pose.length}\n` +
             `Left hand landmarks: ${leftHand.length}\n` +
@@ -182,6 +243,10 @@ export async function initHolisticTracking({
     landmarker: holisticLandmarker,
     stop() {
       if (rafId) cancelAnimationFrame(rafId);
+      rafId = null;
+      if (typeof holisticLandmarker?.close === "function") {
+        holisticLandmarker.close();
+      }
     },
   };
 }

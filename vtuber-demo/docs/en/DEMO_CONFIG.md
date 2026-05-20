@@ -1,6 +1,22 @@
 # Demo runtime configuration (`demo-config.json`)
 
-Place `demo-config.json` next to `index.html` (served as `./demo-config.json`). If the file is missing, built-in defaults apply.
+With **Vite**, copy or edit `public/demo-config.json` (served as `/demo-config.json`). If the file is missing, built-in defaults apply.
+
+## `tracking.swapHandSides`
+
+If **true**, swaps MediaPipe left/right hand channels after detection. Use when the **avatar arms** still feel inverted relative to your body even with `mirrorInference` on.
+
+## `tracking.mirrorInference`
+
+When **true** (default), Holistic receives a **horizontally flipped** video frame so landmark handedness matches the **CSS-mirrored** webcam preview. Set **false** only if you disable the mirror preview or for debugging.
+
+## `webcam`
+
+| Field | Meaning |
+|-------|---------|
+| `videoProfile` | `"standard"`, `"wide"`, or `"compact"` — `getUserMedia` hints. |
+| `objectFit` | Passed to the `<video>` element. |
+| `digitalZoom` | Slight zoom inside the mirrored frame (0.72–1). |
 
 ## `holistic.detectMaxWidth`
 
