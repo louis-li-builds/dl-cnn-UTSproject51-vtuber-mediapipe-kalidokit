@@ -47,7 +47,8 @@ The following described the **older vanilla ESM + import map** layout; the **cur
     - `Kalidokit.Pose.solve(...)`: full / upper-body rig (arm rotations, etc.)
 
 - **Dev Tools**
-  - `npm` is only used to manage the `kalidokit` dependency and start a static server: `npx serve .`
+  - **Vite** — `npm run dev` / `npm run build`
+  - **npm** — `three`, `@pixiv/three-vrm`, `kalidokit`, and UI dependencies
 
 ---
 
@@ -57,46 +58,37 @@ Within the `vtuber-demo` directory:
 
 ```text
 vtuber-demo/
-├─ index.html              # Main HTML + importmap + base layout
-├─ package.json            # npm scripts, kalidokit dependency
+├─ index.html              # Vite entry (root div for React)
+├─ vite.config.ts
+├─ package.json
+├─ public/assets -> ../assets   # VRM models (symlink)
 └─ src/
-   ├─ main.js              # Entry point, wires the whole pipeline
-   ├─ tracking/
-   │  ├─ webcam.js         # Opens webcam, creates video + stage elements
-   │  ├─ holistic.js       # MediaPipe Holistic tracking + overlay drawing
-   │  └─ trackingResult.js # Normalizes raw MediaPipe output into a single format
-   ├─ motion/
-   │  ├─ motionState.js    # Uses Kalidokit + geometry to produce motionState
-   │  └─ smoother.js       # Motion smoothing (exponential moving average)
-   ├─ render/
-   │  └─ scene.js          # Sets up three.js scene, VRM container, render loop
-   └─ avatar/
-      ├─ vrmLoader.js      # Loads VRM via GLTFLoader + VRMLoaderPlugin
-      ├─ vrmMapper.js      # motionState -> avatarState (head/arms/fingers/expressions)
-      └─ vrmDriver.js      # Applies avatarState to VRM humanoid & expressions
+   ├─ main.tsx              # React bootstrap
+   ├─ app/                  # Figma shell (panels, header, hooks)
+   ├─ styles/               # Tailwind + theme
+   └─ pipeline/             # Live demo pipeline (unchanged responsibilities)
+      ├─ boot.js            # Wires webcam → scene → VRM → Holistic
+      ├─ runtimeStore.js    # Status / motion text / log for React panels
+      ├─ avatars.js         # Avatar id → /assets/models/*.vrm
+      ├─ tracking/
+      ├─ motion/
+      ├─ render/
+      └─ avatar/
 ```
 
 ---
 
 ## High-Level Pipeline
 
-### 1. Boot / Initialization (`src/main.js`)
+### 1. Boot (`src/pipeline/boot.js` + `src/app/hooks/useVtuberPipeline.ts`)
 
-- Grabs UI references (`status`, `log`, `input-panel`, `avatar-panel`, `motion-panel`)
-- Calls:
-  - `initWebcam(inputPanel)`: obtain `video` and `stage`
-  - `createSceneRuntime(avatarPanel).start()`: set up 3D scene and start render loop
-  - `loadVrmModel("./assets/models/avatar.vrm")`: load the VRM model into the scene
-  - `initHolisticTracking({ video, stage, onLog, onFrame })`: start per-frame tracking
+- Mount webcam into `#webcam-root` (inside `WebcamPreview`)
+- `createSceneRuntime(avatarPanelRoot).start()` for the Three.js view
+- `loadVrmModel(...)` from `avatars.js` catalog
+- `initHolisticTracking({ video, stage, onLog, onFrame })`
 
-On each tracking frame:
+On each tracking frame: same chain as before (`buildMotionState` → smoother → `mapMotionStateToAvatarState` → `applyAvatarStateToVrm`). Motion text and logs are pushed through `runtimeStore` into **MotionParameters** and **LogPanel**.
 
-1. `buildMotionState(trackingResult, video)`: convert raw landmarks into semantic motion parameters
-2. `faceSmoother.update(rawMotionState)`: smooth the motion values
-3. `mapMotionStateToAvatarState(motionState)`: map to a VRM-friendly avatarState
-4. `applyAvatarStateToVrm(currentVrm, avatarState)`: drive the VRM avatar
-
-At the same time, the `motion-panel` displays live metrics (detection flags, head angles, elbow angles, finger curl, etc.).
 
 ### 2. Webcam + Overlay (`tracking/webcam.js`, `tracking/holistic.js`)
 
