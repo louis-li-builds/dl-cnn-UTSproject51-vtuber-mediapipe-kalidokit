@@ -8,6 +8,8 @@ A browser VTuber demo: **MediaPipe Holistic** → **Kalidokit** → **three.js +
 
 The runnable app uses **Vite + React + Tailwind** (layout from `internal-doc/figma/`). The tracking / VRM pipeline lives under `src/pipeline/` and is booted from `src/pipeline/boot.js`, wired into the React shell via `src/app/hooks/useVtuberPipeline.ts`.
 
+**Layout:** left avatar list and right motion readout use **fixed-width columns** with **internal scroll** when content is long. The bottom **System Logs** strip uses a **fixed height band** (`min` / `max` clamp vs viewport) with scrolling inside the panel — tweak `LEFT_SIDEBAR_W`, `RIGHT_SIDEBAR_W`, and `BOTTOM_LOG_H` in `src/app/App.tsx` if you want different sizes.
+
 ```bash
 cd vtuber-demo
 npm install

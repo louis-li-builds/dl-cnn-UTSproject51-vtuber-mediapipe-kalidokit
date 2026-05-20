@@ -11,15 +11,15 @@ export function AvatarSelector({
   onSelectAvatar,
 }: AvatarSelectorProps) {
   return (
-    <div className="h-full flex flex-col bg-zinc-900 border-r border-zinc-700">
-      <div className="p-4 border-b border-zinc-700">
+    <div className="h-full min-h-0 flex flex-col bg-zinc-900">
+      <div className="shrink-0 p-4 border-b border-zinc-800">
         <h2 className="flex items-center gap-2 text-zinc-100">
           <User className="w-5 h-5" />
           Avatars
         </h2>
       </div>
 
-      <div className="flex-1 overflow-y-auto p-2">
+      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden p-2 [scrollbar-width:thin] [scrollbar-color:#52525b_#09090b]">
         <div className="space-y-1">
           {AVATAR_CATALOG.map((avatar) => (
             <button

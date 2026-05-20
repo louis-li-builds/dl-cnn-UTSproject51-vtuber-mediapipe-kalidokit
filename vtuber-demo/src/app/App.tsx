@@ -1,5 +1,4 @@
 import { useState } from 'react';
-import { Panel, PanelGroup, PanelResizeHandle } from 'react-resizable-panels';
 import { AvatarSelector } from './components/AvatarSelector';
 import { WebcamPreview } from './components/WebcamPreview';
 import { AvatarDisplay } from './components/AvatarDisplay';
@@ -9,6 +8,12 @@ import { AppHeader } from './components/AppHeader';
 import { CollapsiblePanel } from './components/CollapsiblePanel';
 import { useVtuberPipeline } from './hooks/useVtuberPipeline';
 import { useRuntimeStore } from './hooks/useRuntimeStore';
+
+/** Fixed sidebar widths (px-level via Tailwind scale). */
+const LEFT_SIDEBAR_W = 'w-56'; /* 14rem ≈ 224px */
+const RIGHT_SIDEBAR_W = 'w-80'; /* 20rem ≈ 320px — motion text benefits from width */
+/** Bottom log hub: fixed band height, scroll inside panel. */
+const BOTTOM_LOG_H = 'h-48 min-h-[12rem] max-h-[38vh]';
 
 export default function App() {
   const [selectedAvatarId, setSelectedAvatarId] = useState('1');
@@ -34,119 +39,117 @@ export default function App() {
         fps={runtime.isConnected ? 60 : 0}
       />
 
-      <div className="flex-1 min-h-0 overflow-hidden">
-        <PanelGroup direction="horizontal" className="h-full w-full min-h-0">
-          {!isLeftSidebarCollapsed && (
-            <>
-              <Panel defaultSize={15} minSize={10} maxSize={25}>
-                <CollapsiblePanel
-                  isCollapsed={isLeftSidebarCollapsed}
-                  onToggle={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
-                  direction="left"
-                >
-                  <AvatarSelector
-                    selectedAvatarId={selectedAvatarId}
-                    onSelectAvatar={setSelectedAvatarId}
-                  />
-                </CollapsiblePanel>
-              </Panel>
-              <PanelResizeHandle className="w-1 bg-zinc-800 hover:bg-zinc-700 transition-colors" />
-            </>
-          )}
+      <div className="flex flex-1 min-h-0 w-full">
+        {/* Left: fixed width, scroll inside list */}
+        {!isLeftSidebarCollapsed ? (
+          <aside
+            className={`${LEFT_SIDEBAR_W} shrink-0 flex flex-col min-h-0 border-r border-zinc-800 bg-zinc-950`}
+          >
+            <CollapsiblePanel
+              isCollapsed={isLeftSidebarCollapsed}
+              onToggle={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
+              direction="left"
+            >
+              <div className="h-full min-h-0 flex flex-col overflow-hidden">
+                <AvatarSelector
+                  selectedAvatarId={selectedAvatarId}
+                  onSelectAvatar={setSelectedAvatarId}
+                />
+              </div>
+            </CollapsiblePanel>
+          </aside>
+        ) : (
+          <div className="relative w-0 shrink-0 self-stretch overflow-visible z-20">
+            <CollapsiblePanel
+              isCollapsed={isLeftSidebarCollapsed}
+              onToggle={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
+              direction="left"
+            >
+              <div />
+            </CollapsiblePanel>
+          </div>
+        )}
 
-          {isLeftSidebarCollapsed && (
-            <div className="relative w-0">
+        {/* Center: flex-1, vertical stack — main stage + fixed-height log strip */}
+        <div className="flex flex-1 min-w-0 min-h-0 flex-col">
+          <div className="flex flex-1 min-h-0 gap-4 p-4">
+            <div
+              className={`min-w-0 min-h-0 flex flex-col ${
+                isPrimaryViewAvatar ? 'w-[32%] max-w-md' : 'flex-1'
+              }`}
+            >
+              <WebcamPreview
+                isPrimary={!isPrimaryViewAvatar}
+                onSwapView={handleSwapView}
+                onMountReady={setWebcamMount}
+              />
+            </div>
+            <div
+              className={`min-w-0 min-h-0 flex flex-col ${
+                isPrimaryViewAvatar ? 'flex-1' : 'w-[32%] max-w-md'
+              }`}
+            >
+              <AvatarDisplay
+                isPrimary={isPrimaryViewAvatar}
+                onSwapView={handleSwapView}
+                onMountReady={setAvatarMount}
+              />
+            </div>
+          </div>
+
+          {!isBottomPanelCollapsed ? (
+            <div
+              className={`shrink-0 ${BOTTOM_LOG_H} border-t border-zinc-800 bg-zinc-950 px-4 pb-3 pt-0 flex flex-col min-h-0`}
+            >
               <CollapsiblePanel
-                isCollapsed={isLeftSidebarCollapsed}
-                onToggle={() => setIsLeftSidebarCollapsed(!isLeftSidebarCollapsed)}
-                direction="left"
+                isCollapsed={isBottomPanelCollapsed}
+                onToggle={() => setIsBottomPanelCollapsed(!isBottomPanelCollapsed)}
+                direction="bottom"
+              >
+                <div className="h-full min-h-0 flex flex-col overflow-hidden pt-2">
+                  <LogPanel logText={runtime.logText} />
+                </div>
+              </CollapsiblePanel>
+            </div>
+          ) : (
+            <div className="relative h-0 shrink-0 overflow-visible z-20">
+              <CollapsiblePanel
+                isCollapsed={isBottomPanelCollapsed}
+                onToggle={() => setIsBottomPanelCollapsed(!isBottomPanelCollapsed)}
+                direction="bottom"
               >
                 <div />
               </CollapsiblePanel>
             </div>
           )}
+        </div>
 
-          <Panel minSize={40} className="min-h-0 overflow-hidden">
-            <PanelGroup direction="vertical" className="h-full min-h-0">
-              <Panel defaultSize={70} minSize={40} className="min-h-0 overflow-hidden">
-                <div className="h-full p-4">
-                  <div className="h-full flex gap-4">
-                    <div className={isPrimaryViewAvatar ? 'w-1/3' : 'flex-1'}>
-                      <WebcamPreview
-                        isPrimary={!isPrimaryViewAvatar}
-                        onSwapView={handleSwapView}
-                        onMountReady={setWebcamMount}
-                      />
-                    </div>
-                    <div className={isPrimaryViewAvatar ? 'flex-1' : 'w-1/3'}>
-                      <AvatarDisplay
-                        isPrimary={isPrimaryViewAvatar}
-                        onSwapView={handleSwapView}
-                        onMountReady={setAvatarMount}
-                      />
-                    </div>
-                  </div>
-                </div>
-              </Panel>
-
-              {!isBottomPanelCollapsed && (
-                <>
-                  <PanelResizeHandle className="h-1 bg-zinc-800 hover:bg-zinc-700 transition-colors" />
-                  <Panel defaultSize={30} minSize={15} maxSize={50}>
-                    <div className="h-full px-4 pb-4">
-                      <CollapsiblePanel
-                        isCollapsed={isBottomPanelCollapsed}
-                        onToggle={() => setIsBottomPanelCollapsed(!isBottomPanelCollapsed)}
-                        direction="bottom"
-                      >
-                        <LogPanel logText={runtime.logText} />
-                      </CollapsiblePanel>
-                    </div>
-                  </Panel>
-                </>
-              )}
-
-              {isBottomPanelCollapsed && (
-                <div className="relative h-0">
-                  <CollapsiblePanel
-                    isCollapsed={isBottomPanelCollapsed}
-                    onToggle={() => setIsBottomPanelCollapsed(!isBottomPanelCollapsed)}
-                    direction="bottom"
-                  >
-                    <div />
-                  </CollapsiblePanel>
-                </div>
-              )}
-            </PanelGroup>
-          </Panel>
-
-          {!isRightSidebarCollapsed && (
-            <>
-              <PanelResizeHandle className="w-1 bg-zinc-800 hover:bg-zinc-700 transition-colors" />
-              <Panel defaultSize={20} minSize={15} maxSize={30}>
-                <CollapsiblePanel
-                  isCollapsed={isRightSidebarCollapsed}
-                  onToggle={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-                  direction="right"
-                >
-                  <MotionParameters motionText={runtime.motionText} />
-                </CollapsiblePanel>
-              </Panel>
-            </>
-          )}
-
-          {isRightSidebarCollapsed && (
-            <div className="relative w-0">
-              <CollapsiblePanel
-                isCollapsed={isRightSidebarCollapsed}
-                onToggle={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
-                direction="right"
-              >
-                <div />
-              </CollapsiblePanel>
-            </div>
-          )}
-        </PanelGroup>
+        {/* Right: fixed width, scroll inside motion text */}
+        {!isRightSidebarCollapsed ? (
+          <aside
+            className={`${RIGHT_SIDEBAR_W} shrink-0 flex flex-col min-h-0 border-l border-zinc-800 bg-zinc-950`}
+          >
+            <CollapsiblePanel
+              isCollapsed={isRightSidebarCollapsed}
+              onToggle={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+              direction="right"
+            >
+              <div className="h-full min-h-0 flex flex-col overflow-hidden p-2">
+                <MotionParameters motionText={runtime.motionText} />
+              </div>
+            </CollapsiblePanel>
+          </aside>
+        ) : (
+          <div className="relative w-0 shrink-0 self-stretch overflow-visible z-20">
+            <CollapsiblePanel
+              isCollapsed={isRightSidebarCollapsed}
+              onToggle={() => setIsRightSidebarCollapsed(!isRightSidebarCollapsed)}
+              direction="right"
+            >
+              <div />
+            </CollapsiblePanel>
+          </div>
+        )}
       </div>
     </div>
   );

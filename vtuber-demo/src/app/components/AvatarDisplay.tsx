@@ -12,8 +12,8 @@ export function AvatarDisplay({
   onMountReady,
 }: AvatarDisplayProps) {
   return (
-    <div className="h-full flex flex-col bg-zinc-900 rounded-lg overflow-hidden">
-      <div className="flex items-center justify-between p-3 bg-zinc-800 border-b border-zinc-700">
+    <div className="h-full min-h-0 flex flex-col bg-zinc-900 rounded-lg overflow-hidden border border-zinc-800">
+      <div className="shrink-0 flex items-center justify-between p-3 bg-zinc-800 border-b border-zinc-700">
         <h3 className="text-sm text-zinc-100 flex items-center gap-2">
           Avatar Display
           {isPrimary && (
