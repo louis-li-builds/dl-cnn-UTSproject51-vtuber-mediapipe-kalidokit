@@ -38,10 +38,13 @@ function remapUpperArmLiftLegacy(value, side) {
 
 function remapElbowLegacy(value, side) {
   const angle = safe(value, 180);
+
   let bend = 180 - angle;
   bend = Math.max(0, bend - 12);
+
   const deg = clamp(bend * 1.1, 0, 120);
   const rad = degToRad(deg);
+
   return side === "left" ? -rad : rad;
 }
 
@@ -85,31 +88,113 @@ function getLowerArmRotation(motionState, side) {
   };
 }
 
-function getHandRotation(motionState, side) {
-  const hands = motionState.hands ?? {};
+function calibrateWrist(rot, side) {
+  const x = safe(rot?.x, 0);
+  const y = safe(rot?.y, 0);
+  const z = safe(rot?.z, 0);
 
-  const wristAngle =
-    side === "left"
-      ? hands.left?.wrist_angle
-      : hands.right?.wrist_angle;
-
-  if (!Number.isFinite(wristAngle)) {
-    return { x: 0, y: 0, z: 0 };
+  if (side === "left") {
+    return {
+      x: clamp(-x * 0.85, -1.0, 1.0),
+      y: clamp(y * 0.65, -0.8, 0.8),
+      z: clamp(-z * 0.9, -1.2, 1.2),
+    };
   }
 
   return {
-    x: 0,
-    y: 0,
-    z: degToRad(wristAngle),
+    x: clamp(x * 0.85, -1.0, 1.0),
+    y: clamp(-y * 0.65, -0.8, 0.8),
+    z: clamp(z * 0.9, -1.2, 1.2),
   };
 }
 
-function getFingerValue(motionState, side, fingerName) {
+/**
+ * Wrist on the avatar:
+ * - `wrist_angle` (2D, from landmarks) is usually the most stable “in-plane” roll.
+ * - `wrist_rot` (3D heuristic) adds tilt but picks up noise → blend, do not let it fully own the joint.
+ */
+function getHandRotation(motionState, side) {
   const hand = side === "left" ? motionState.hands?.left : motionState.hands?.right;
-  return safe(hand?.finger_curl?.[fingerName], 0);
+
+  const wristAngle = hand?.wrist_angle;
+  const baseZ = Number.isFinite(wristAngle) ? degToRad(wristAngle) : 0;
+
+  const hasFullWristRot =
+    Number.isFinite(hand?.wrist_rot?.x) &&
+    Number.isFinite(hand?.wrist_rot?.y) &&
+    Number.isFinite(hand?.wrist_rot?.z);
+
+  if (!hasFullWristRot && !Number.isFinite(wristAngle)) {
+    return { x: 0, y: 0, z: 0 };
+  }
+
+  if (hasFullWristRot) {
+    const wr = calibrateWrist(hand.wrist_rot, side);
+    if (Number.isFinite(wristAngle)) {
+      return {
+        x: wr.x * 0.32,
+        y: wr.y * 0.32,
+        z: clamp(baseZ * 0.72 + wr.z * 0.28, -1.35, 1.35),
+      };
+    }
+    return wr;
+  }
+
+  return { x: 0, y: 0, z: baseZ };
+}
+
+/** Tuning: raise multipliers if fingers still look “dead”; lower if they over-bend or clip. */
+const FINGER_GAIN = 1.38;
+
+function makeThumbCurl(curl, side) {
+  const c = clamp(safe(curl, 0), 0, 1) * FINGER_GAIN;
+  const spread = side === "left" ? 1 : -1;
+
+  return {
+    metacarpal: {
+      x: 0,
+      y: clamp(spread * 0.22 * c, -0.55, 0.55),
+      z: clamp(-0.18 * c, -0.85, 0.85),
+    },
+    proximal: {
+      x: 0,
+      y: 0,
+      z: clamp(-0.42 * c, -1.15, 1.15),
+    },
+    distal: {
+      x: 0,
+      y: 0,
+      z: clamp(-0.30 * c, -0.95, 0.95),
+    },
+  };
+}
+
+function makeFingerCurl(curl) {
+  const c = clamp(safe(curl, 0), 0, 1) * FINGER_GAIN;
+
+  return {
+    proximal: {
+      x: 0,
+      y: 0,
+      z: clamp(-0.55 * c, -1.35, 1.35),
+    },
+    intermediate: {
+      x: 0,
+      y: 0,
+      z: clamp(-0.90 * c, -1.85, 1.85),
+    },
+    distal: {
+      x: 0,
+      y: 0,
+      z: clamp(-0.55 * c, -1.35, 1.35),
+    },
+  };
 }
 
 export function mapMotionStateToAvatarState(motionState) {
+  const leftHand = motionState.hands?.left;
+  const rightHand = motionState.hands?.right;
+
   return {
     lookAt: {
       yaw: safe(motionState.face?.head_yaw, 0),
@@ -119,7 +204,6 @@ export function mapMotionStateToAvatarState(motionState) {
     expressions: {
       blinkLeft: remapBlink(motionState.face?.blink_left),
       blinkRight: remapBlink(motionState.face?.blink_right),
-
       aa: remapMouth(motionState.face?.mouth_open),
       ih: 0,
       ou: 0,
@@ -136,7 +220,6 @@ export function mapMotionStateToAvatarState(motionState) {
 
       leftUpperArm: getUpperArmRotation(motionState, "left"),
       rightUpperArm: getUpperArmRotation(motionState, "right"),
-
       leftLowerArm: getLowerArmRotation(motionState, "left"),
       rightLowerArm: getLowerArmRotation(motionState, "right"),
 
@@ -146,18 +229,18 @@ export function mapMotionStateToAvatarState(motionState) {
 
     fingers: {
       left: {
-        thumb: getFingerValue(motionState, "left", "thumb"),
-        index: getFingerValue(motionState, "left", "index"),
-        middle: getFingerValue(motionState, "left", "middle"),
-        ring: getFingerValue(motionState, "left", "ring"),
-        pinky: getFingerValue(motionState, "left", "pinky"),
+        thumb: makeThumbCurl(leftHand?.finger_curl?.thumb, "left"),
+        index: makeFingerCurl(leftHand?.finger_curl?.index),
+        middle: makeFingerCurl(leftHand?.finger_curl?.middle),
+        ring: makeFingerCurl(leftHand?.finger_curl?.ring),
+        little: makeFingerCurl(leftHand?.finger_curl?.pinky),
       },
       right: {
-        thumb: getFingerValue(motionState, "right", "thumb"),
-        index: getFingerValue(motionState, "right", "index"),
-        middle: getFingerValue(motionState, "right", "middle"),
-        ring: getFingerValue(motionState, "right", "ring"),
-        pinky: getFingerValue(motionState, "right", "pinky"),
+        thumb: makeThumbCurl(rightHand?.finger_curl?.thumb, "right"),
+        index: makeFingerCurl(rightHand?.finger_curl?.index),
+        middle: makeFingerCurl(rightHand?.finger_curl?.middle),
+        ring: makeFingerCurl(rightHand?.finger_curl?.ring),
+        little: makeFingerCurl(rightHand?.finger_curl?.pinky),
       },
     },
   };

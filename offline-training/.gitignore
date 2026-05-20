@@ -1,0 +1,17 @@
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+
+# Large / generated (keep README + small JSON if you want)
+data/*
+!data/README.md
+
+artifacts/experiments/**
+!artifacts/experiments/.gitkeep
+
+artifacts/best/*
+!artifacts/best/.gitkeep
+!artifacts/best/README.md

@@ -27,6 +27,38 @@ function safeRot(rot) {
   };
 }
 
+function vec3Sub(a, b) {
+  return {
+    x: (a?.x ?? 0) - (b?.x ?? 0),
+    y: (a?.y ?? 0) - (b?.y ?? 0),
+    z: (a?.z ?? 0) - (b?.z ?? 0),
+  };
+}
+
+function vec3Len(v) {
+  return Math.sqrt(v.x * v.x + v.y * v.y + v.z * v.z);
+}
+
+function vec3Normalize(v) {
+  const len = vec3Len(v);
+  if (len < 1e-6) {
+    return { x: 0, y: 0, z: 0 };
+  }
+  return {
+    x: v.x / len,
+    y: v.y / len,
+    z: v.z / len,
+  };
+}
+
+function vec3Cross(a, b) {
+  return {
+    x: a.y * b.z - a.z * b.y,
+    y: a.z * b.x - a.x * b.z,
+    z: a.x * b.y - a.y * b.x,
+  };
+}
+
 function distance3D(a, b) {
   if (!a || !b) return 0;
   const dx = (a.x ?? 0) - (b.x ?? 0);
@@ -65,16 +97,8 @@ function calculateElbowAngle(poseLandmarks, side) {
   }
 
   const INDEX = {
-    left: {
-      shoulder: 11,
-      elbow: 13,
-      wrist: 15,
-    },
-    right: {
-      shoulder: 12,
-      elbow: 14,
-      wrist: 16,
-    },
+    left: { shoulder: 11, elbow: 13, wrist: 15 },
+    right: { shoulder: 12, elbow: 14, wrist: 16 },
   };
 
   const idx = INDEX[side];
@@ -214,47 +238,115 @@ function calculateWristAngle2D(handLandmarks) {
   return Math.atan2(dy, dx) * (180 / Math.PI);
 }
 
-function calculateFingerCurl(handLandmarks, fingerName) {
-  if (!handLandmarks || handLandmarks.length === 0) {
+const REGULAR_FINGER_INDEX = {
+  index: [5, 6, 7, 8],
+  middle: [9, 10, 11, 12],
+  ring: [13, 14, 15, 16],
+  pinky: [17, 18, 19, 20],
+};
+
+function angleToCurl(angleDeg, openAngle, closedAngle) {
+  if (angleDeg === null || angleDeg === undefined) {
     return null;
   }
-
-  const FINGER_INDEX = {
-    thumb: [1, 2, 3, 4],
-    index: [5, 6, 7, 8],
-    middle: [9, 10, 11, 12],
-    ring: [13, 14, 15, 16],
-    pinky: [17, 18, 19, 20],
-  };
-
-  const idx = FINGER_INDEX[fingerName];
-  if (!idx) return null;
-
-  const a = handLandmarks[idx[0]];
-  const b = handLandmarks[idx[1]];
-  const c = handLandmarks[idx[2]];
-  const d = handLandmarks[idx[3]];
-
-  if (!a || !b || !c || !d) {
-    return null;
-  }
-
-  const angle1 = calculateAngle3D(a, b, c);
-  const angle2 = calculateAngle3D(b, c, d);
-
-  if (angle1 === null || angle2 === null) {
-    return null;
-  }
-
-  const avgAngle = (angle1 + angle2) / 2;
-
-  const OPEN_ANGLE = fingerName === "thumb" ? 155 : 170;
-  const CLOSED_ANGLE = fingerName === "thumb" ? 80 : 70;
 
   const curl =
-    (OPEN_ANGLE - avgAngle) / (OPEN_ANGLE - CLOSED_ANGLE);
+    (openAngle - angleDeg) / (openAngle - closedAngle);
 
   return clamp(curl, 0, 1);
+}
+
+function weightedAverageAngle(angleItems) {
+  const valid = angleItems.filter(
+    (item) => item && item.angle !== null && item.angle !== undefined
+  );
+
+  if (valid.length === 0) {
+    return null;
+  }
+
+  const totalWeight = valid.reduce((sum, item) => sum + item.weight, 0);
+  if (totalWeight < 1e-6) {
+    return null;
+  }
+
+  const weightedSum = valid.reduce(
+    (sum, item) => sum + item.angle * item.weight,
+    0
+  );
+
+  return weightedSum / totalWeight;
+}
+
+function calculateThumbCurl(handLandmarks) {
+  if (!handLandmarks || handLandmarks.length < 21) {
+    return null;
+  }
+
+  const wrist = handLandmarks[0];
+  const cmc = handLandmarks[1];
+  const mcp = handLandmarks[2];
+  const ip = handLandmarks[3];
+  const tip = handLandmarks[4];
+
+  if (!wrist || !cmc || !mcp || !ip || !tip) {
+    return null;
+  }
+
+  const baseAngle = calculateAngle3D(wrist, cmc, mcp);
+  const midAngle = calculateAngle3D(cmc, mcp, ip);
+  const tipAngle = calculateAngle3D(mcp, ip, tip);
+
+  const avgAngle = weightedAverageAngle([
+    { angle: baseAngle, weight: 0.40 },
+    { angle: midAngle, weight: 0.35 },
+    { angle: tipAngle, weight: 0.25 },
+  ]);
+
+  return angleToCurl(avgAngle, 155, 70);
+}
+
+function calculateRegularFingerCurl(handLandmarks, fingerName) {
+  if (!handLandmarks || handLandmarks.length < 21) {
+    return null;
+  }
+
+  const idx = REGULAR_FINGER_INDEX[fingerName];
+  if (!idx) {
+    return null;
+  }
+
+  const wrist = handLandmarks[0];
+  const mcp = handLandmarks[idx[0]];
+  const pip = handLandmarks[idx[1]];
+  const dip = handLandmarks[idx[2]];
+  const tip = handLandmarks[idx[3]];
+
+  if (!wrist || !mcp || !pip || !dip || !tip) {
+    return null;
+  }
+
+  const baseAngle = calculateAngle3D(wrist, mcp, pip);
+  const midAngle = calculateAngle3D(mcp, pip, dip);
+  const tipAngle = calculateAngle3D(pip, dip, tip);
+
+  const avgAngle = weightedAverageAngle([
+    { angle: baseAngle, weight: 0.20 },
+    { angle: midAngle, weight: 0.50 },
+    { angle: tipAngle, weight: 0.30 },
+  ]);
+
+  return angleToCurl(avgAngle, 170, 65);
+}
+
+function calculateAllFingerCurl(handLandmarks) {
+  return {
+    thumb: calculateThumbCurl(handLandmarks),
+    index: calculateRegularFingerCurl(handLandmarks, "index"),
+    middle: calculateRegularFingerCurl(handLandmarks, "middle"),
+    ring: calculateRegularFingerCurl(handLandmarks, "ring"),
+    pinky: calculateRegularFingerCurl(handLandmarks, "pinky"),
+  };
 }
 
 function calculatePinchDistance(handLandmarks) {
@@ -319,11 +411,60 @@ function classifyBasicGesture(fingerCurl, pinchDistance) {
   return "mixed";
 }
 
-function solveHand(handLandmarks) {
+function estimateWristRotation(handLandmarks, handWorldLandmarks, side) {
+  const lms =
+    handWorldLandmarks && handWorldLandmarks.length >= 21
+      ? handWorldLandmarks
+      : handLandmarks;
+
+  if (!lms || lms.length < 21) {
+    return { x: null, y: null, z: null };
+  }
+
+  const wrist = lms[0];
+  const indexMcp = lms[5];
+  const middleMcp = lms[9];
+  const pinkyMcp = lms[17];
+
+  if (!wrist || !indexMcp || !middleMcp || !pinkyMcp) {
+    return { x: null, y: null, z: null };
+  }
+
+  const across = vec3Normalize(vec3Sub(indexMcp, pinkyMcp));
+  const forward = vec3Normalize(vec3Sub(middleMcp, wrist));
+  let normal = vec3Normalize(vec3Cross(across, forward));
+
+  if (side === "left") {
+    normal = { x: -normal.x, y: -normal.y, z: -normal.z };
+  }
+
+  const imageWrist = handLandmarks?.[0];
+  const imageMiddle = handLandmarks?.[9];
+
+  let zRoll = 0;
+  if (imageWrist && imageMiddle) {
+    const dx = imageMiddle.x - imageWrist.x;
+    const dy = imageMiddle.y - imageWrist.y;
+    zRoll = -(Math.atan2(dy, dx) + Math.PI / 2);
+  }
+
+  const xPitch = clamp(normal.y * 1.2, -0.9, 0.9);
+  const yYaw = clamp(normal.x * 1.0, -0.9, 0.9);
+  const z = clamp(zRoll, -1.4, 1.4);
+
+  return {
+    x: xPitch,
+    y: yYaw,
+    z,
+  };
+}
+
+function solveHand(handLandmarks, handWorldLandmarks, side) {
   if (!handLandmarks || handLandmarks.length === 0) {
     return {
       detected: false,
       wrist_angle: null,
+      wrist_rot: { x: null, y: null, z: null },
       palm_open: null,
       pinch_distance: null,
       gesture_basic: "unknown",
@@ -338,13 +479,7 @@ function solveHand(handLandmarks) {
     };
   }
 
-  const fingerCurl = {
-    thumb: calculateFingerCurl(handLandmarks, "thumb"),
-    index: calculateFingerCurl(handLandmarks, "index"),
-    middle: calculateFingerCurl(handLandmarks, "middle"),
-    ring: calculateFingerCurl(handLandmarks, "ring"),
-    pinky: calculateFingerCurl(handLandmarks, "pinky"),
-  };
+  const fingerCurl = calculateAllFingerCurl(handLandmarks);
 
   const validCurl = Object.values(fingerCurl).filter((v) => v !== null);
   const avgCurl =
@@ -356,10 +491,12 @@ function solveHand(handLandmarks) {
   const pinchDistance = calculatePinchDistance(handLandmarks);
   const gestureBasic = classifyBasicGesture(fingerCurl, pinchDistance);
   const wristAngle = calculateWristAngle2D(handLandmarks);
+  const wristRot = estimateWristRotation(handLandmarks, handWorldLandmarks, side);
 
   return {
     detected: true,
     wrist_angle: wristAngle,
+    wrist_rot: wristRot,
     palm_open: palmOpen,
     pinch_distance: pinchDistance,
     gesture_basic: gestureBasic,
@@ -374,11 +511,13 @@ export function buildMotionState(trackingResult, video = null) {
   const poseWorldLandmarks = trackingResult.pose?.worldLandmarks ?? [];
   const leftHandLandmarks = trackingResult.hands?.left?.landmarks ?? [];
   const rightHandLandmarks = trackingResult.hands?.right?.landmarks ?? [];
+  const leftHandWorldLandmarks = trackingResult.hands?.left?.worldLandmarks ?? [];
+  const rightHandWorldLandmarks = trackingResult.hands?.right?.worldLandmarks ?? [];
 
   const face = solveFace(faceLandmarks, video);
   const pose = solvePose(poseLandmarks, poseWorldLandmarks, video);
-  const leftHand = solveHand(leftHandLandmarks);
-  const rightHand = solveHand(rightHandLandmarks);
+  const leftHand = solveHand(leftHandLandmarks, leftHandWorldLandmarks, "left");
+  const rightHand = solveHand(rightHandLandmarks, rightHandWorldLandmarks, "right");
 
   const leftElbowAngle = calculateElbowAngle(poseLandmarks, "left");
   const rightElbowAngle = calculateElbowAngle(poseLandmarks, "right");
@@ -401,15 +540,12 @@ export function buildMotionState(trackingResult, video = null) {
 
     upper_body: {
       detected: pose.detected,
-
       left_upper_arm: safeRot(pose.raw?.LeftUpperArm),
       right_upper_arm: safeRot(pose.raw?.RightUpperArm),
       left_lower_arm: safeRot(pose.raw?.LeftLowerArm),
       right_lower_arm: safeRot(pose.raw?.RightLowerArm),
-
       left_elbow_angle: leftElbowAngle,
       right_elbow_angle: rightElbowAngle,
-
       raw: pose.raw,
     },
 

@@ -1,22 +1,19 @@
-.DS_Store
-Thumbs.db
-
-# dependencies
 node_modules/
-
-# local env
+.DS_Store
+*.log
 .env
 .env.*
 
-# logs
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-
-# build artifacts / caches
 dist/
 build/
-.parcel-cache/
-.vite/
-.next/
+.cache/
 
+# Python / offline training
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Internal team docs (explicitly not version-controlled)
+internal-doc/

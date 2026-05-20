@@ -89,11 +89,10 @@ At the same time, the `motion-panel` displays live metrics (detection flags, hea
   - Creates a `stage` container and `<video>` element, with `scaleX(-1)` to mirror the view
 - `initHolisticTracking({ video, stage, onLog, onFrame })`:
   - Loads the MediaPipe Tasks Vision bundle from a CDN
-  - Creates a `HolisticLandmarker` instance
+  - Creates `HolisticLandmarker` and a dedicated `HandLandmarker` (official `.task` URLs)
   - Overlays a transparent `<canvas>` on top of `stage` and draws landmarks
   - On each frame:
-    - Runs `holisticLandmarker.detectForVideo(video, nowMs)`
-    - Uses `buildTrackingResult(rawResult, nowMs)` to normalize the output
+    - Runs both detectors, then `buildTrackingResult({ holisticResult, handResult }, nowMs)` (hands prefer `handLandmarker`, fallback to Holistic)
     - Calls `onFrame(trackingResult)` for the main pipeline
 
 ### 3. Tracking Result → Motion State (`motion/motionState.js`)
@@ -103,7 +102,7 @@ At the same time, the `motion-panel` displays live metrics (detection flags, hea
   - Calls:
     - `solveFace(...)` (Kalidokit Face)
     - `solvePose(...)` (Kalidokit Pose)
-    - `solveHand(...)` (custom hand feature extraction)
+    - `solveHand(...)` (weighted finger curl, pinch, `wrist_angle` + `wrist_rot` from image + world landmarks when available)
     - `calculateElbowAngle(...)` (three-point angle for elbow joints)
   - Produces a unified `motionState` structure:
     - `motionState.face.*`: head rotation (degrees), blink, mouth openness
@@ -112,10 +111,11 @@ At the same time, the `motion-panel` displays live metrics (detection flags, hea
 
 ### 4. Smoothing (`motion/smoother.js`)
 
-- `createMotionSmoother({ alpha })`:
+- `createMotionSmoother({ alpha, wristRotSmoothAlpha, fingerCurlSmoothAlpha })`:
   - Uses exponential moving average (EMA) to smooth numeric values
-  - Reduces jitter from tracking before it is applied to the avatar
-  - Smaller alpha = smoother but more latency (this project uses `alpha = 0.35`)
+  - `wristRotSmoothAlpha` can be **lower than `alpha`** to reduce wrist jitter from the 3D `wrist_rot` heuristic
+  - `fingerCurlSmoothAlpha` can be **slightly higher than `alpha`** so finger curl follows landmarks a bit faster
+  - Smaller `alpha` = smoother but more latency (defaults are set in `main.js`)
 
 ### 5. Motion State → Avatar State (`avatar/vrmMapper.js`)
 
@@ -128,9 +128,9 @@ At the same time, the `motion-panel` displays live metrics (detection flags, hea
   - **Bones**:
     - Upper and lower arms primarily use Kalidokit Pose.solve rotations
     - If no Pose rotation is available, falls back to legacy elbow/arm-lift based mapping
-    - Hands use 2D wrist_angle (degrees) converted to z-axis rotation (radians)
+    - Hands prefer `wrist_rot` (radians-ish, from world landmarks when present) passed through `calibrateWrist`; otherwise `wrist_angle` (degrees) on the hand z-axis
   - **Fingers**:
-    - Stores per-finger curl values (0–1) for both hands, as a basis for future finger bone driving
+    - Maps each finger curl (0–1) into thumb metacarpal/proximal/distal and other fingers proximal/intermediate/distal euler targets for `vrmDriver`
 
 ### 6. Avatar State → VRM (`avatar/vrmDriver.js`)
 
@@ -138,6 +138,7 @@ At the same time, the `motion-panel` displays live metrics (detection flags, hea
   - Uses `vrm.humanoid` to obtain head / arms / hands bones
   - Converts head angles from degrees to radians and clamps them (e.g., yaw -45° ~ 45°)
   - Applies arm / forearm / hand rotations (radians) back to the VRM skeleton with sane limits
+  - Drives finger chains from nested `avatarState.fingers` (per-segment rotations with clamps)
   - Uses `vrm.expressionManager` to set:
     - `BlinkLeft / BlinkRight` (or a combined Blink fallback)
     - `Aa` (mouth openness based on remapped mouth_open)

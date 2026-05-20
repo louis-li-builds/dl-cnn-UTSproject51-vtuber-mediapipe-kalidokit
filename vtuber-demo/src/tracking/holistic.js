@@ -1,4 +1,5 @@
 import { buildTrackingResult } from "./trackingResult.js";
+import { createDedicatedHandTracker } from "./handLandmarker.js";
 
 const TASKS_VISION_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs";
@@ -6,7 +7,7 @@ const TASKS_VISION_URL =
 const WASM_ROOT =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm";
 
-const MODEL_URL =
+const HOLISTIC_MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task";
 
 function createOverlayCanvas(stage) {
@@ -55,12 +56,18 @@ function drawPoints(ctx, landmarks, color, radius = 2) {
   }
 }
 
-export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
+export async function initHolisticTracking({
+  video,
+  stage,
+  onLog,
+  onFrame,
+  getTrackingOptions = () => ({}),
+}) {
   if (!video) throw new Error("Video element is required.");
   if (!stage) throw new Error("Tracking stage is required.");
 
   const vision = await import(TASKS_VISION_URL);
-  const { FilesetResolver, HolisticLandmarker } = vision;
+  const { FilesetResolver, HolisticLandmarker, HandLandmarker } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(WASM_ROOT);
 
@@ -68,13 +75,18 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
     filesetResolver,
     {
       baseOptions: {
-        modelAssetPath: MODEL_URL,
+        modelAssetPath: HOLISTIC_MODEL_URL,
       },
       runningMode: "VIDEO",
       numFaces: 1,
       outputFaceBlendshapes: false,
     }
   );
+
+  const dedicatedHandTracker = await createDedicatedHandTracker({
+    filesetResolver,
+    HandLandmarker,
+  });
 
   const canvas = createOverlayCanvas(stage);
   const ctx = canvas.getContext("2d");
@@ -94,8 +106,21 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
       lastVideoTime = video.currentTime;
 
       const nowMs = performance.now();
-      const rawResult = holisticLandmarker.detectForVideo(video, nowMs);
-      const trackingResult = buildTrackingResult(rawResult, nowMs);
+
+      const holisticResult = holisticLandmarker.detectForVideo(video, nowMs);
+      const handResult = dedicatedHandTracker.detect(video, nowMs);
+
+      const trackOpts =
+        typeof getTrackingOptions === "function" ? getTrackingOptions() : {};
+
+      const trackingResult = buildTrackingResult(
+        {
+          holisticResult,
+          handResult,
+        },
+        nowMs,
+        trackOpts
+      );
 
       const face = trackingResult.face.landmarks;
       const pose = trackingResult.pose.landmarks;
@@ -115,11 +140,11 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
 
       if (onLog) {
         onLog(
-          "Holistic tracking active.\n" +
+          "Holistic + HandLandmarker active.\n" +
             `Face landmarks: ${face.length}\n` +
             `Pose landmarks: ${pose.length}\n` +
-            `Left hand landmarks: ${leftHand.length}\n` +
-            `Right hand landmarks: ${rightHand.length}`
+            `Left hand: ${leftHand.length} (source: ${trackingResult.hands.left.source})\n` +
+            `Right hand: ${rightHand.length} (source: ${trackingResult.hands.right.source})`
         );
       }
     }
@@ -131,9 +156,16 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
 
   return {
     canvas,
-    landmarker: holisticLandmarker,
+    holisticLandmarker,
+    dedicatedHandTracker,
     stop() {
       if (rafId) cancelAnimationFrame(rafId);
+      if (typeof dedicatedHandTracker?.close === "function") {
+        dedicatedHandTracker.close();
+      }
+      if (typeof holisticLandmarker?.close === "function") {
+        holisticLandmarker.close();
+      }
     },
   };
 }

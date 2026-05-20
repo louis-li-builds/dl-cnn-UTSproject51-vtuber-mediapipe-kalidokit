@@ -8,22 +8,6 @@ function smoothNumber(prev, next, alpha) {
   return lerp(prev, next, alpha);
 }
 
-function createEmptyHandState() {
-  return {
-    wrist_angle: null,
-    palm_open: null,
-    pinch_distance: null,
-    gesture_basic: "unknown",
-    finger_curl: {
-      thumb: null,
-      index: null,
-      middle: null,
-      ring: null,
-      pinky: null,
-    },
-  };
-}
-
 function createEmptyRot() {
   return {
     x: null,
@@ -40,7 +24,24 @@ function smoothRot(prevRot, nextRot, alpha) {
   };
 }
 
-function smoothHand(prevHand, nextHand, alpha) {
+function createEmptyHandState() {
+  return {
+    wrist_angle: null,
+    wrist_rot: createEmptyRot(),
+    palm_open: null,
+    pinch_distance: null,
+    gesture_basic: "unknown",
+    finger_curl: {
+      thumb: null,
+      index: null,
+      middle: null,
+      ring: null,
+      pinky: null,
+    },
+  };
+}
+
+function smoothHand(prevHand, nextHand, alpha, wristRotAlpha, fingerAlpha) {
   if (!nextHand || !nextHand.detected) {
     return {
       detected: false,
@@ -49,23 +50,31 @@ function smoothHand(prevHand, nextHand, alpha) {
     };
   }
 
+  const rotAlpha = wristRotAlpha ?? alpha;
+  const fAlpha = fingerAlpha ?? alpha;
+
   return {
     ...nextHand,
     wrist_angle: smoothNumber(prevHand.wrist_angle, nextHand.wrist_angle, alpha),
+    wrist_rot: smoothRot(prevHand.wrist_rot, nextHand.wrist_rot, rotAlpha),
     palm_open: smoothNumber(prevHand.palm_open, nextHand.palm_open, alpha),
     pinch_distance: smoothNumber(prevHand.pinch_distance, nextHand.pinch_distance, alpha),
     finger_curl: {
-      thumb: smoothNumber(prevHand.finger_curl.thumb, nextHand.finger_curl.thumb, alpha),
-      index: smoothNumber(prevHand.finger_curl.index, nextHand.finger_curl.index, alpha),
-      middle: smoothNumber(prevHand.finger_curl.middle, nextHand.finger_curl.middle, alpha),
-      ring: smoothNumber(prevHand.finger_curl.ring, nextHand.finger_curl.ring, alpha),
-      pinky: smoothNumber(prevHand.finger_curl.pinky, nextHand.finger_curl.pinky, alpha),
+      thumb: smoothNumber(prevHand.finger_curl.thumb, nextHand.finger_curl.thumb, fAlpha),
+      index: smoothNumber(prevHand.finger_curl.index, nextHand.finger_curl.index, fAlpha),
+      middle: smoothNumber(prevHand.finger_curl.middle, nextHand.finger_curl.middle, fAlpha),
+      ring: smoothNumber(prevHand.finger_curl.ring, nextHand.finger_curl.ring, fAlpha),
+      pinky: smoothNumber(prevHand.finger_curl.pinky, nextHand.finger_curl.pinky, fAlpha),
     },
   };
 }
 
 export function createMotionSmoother(config = {}) {
   const alpha = config.alpha ?? 0.35;
+  /** Lower = less wrist jitter from `wrist_rot` (still follows, just heavier low-pass). */
+  const wristRotSmoothAlpha = config.wristRotSmoothAlpha ?? alpha * 0.55;
+  /** Slightly higher = finger curl follows landmarks faster (cap keeps stability). */
+  const fingerCurlSmoothAlpha = config.fingerCurlSmoothAlpha ?? Math.min(0.58, alpha * 1.25);
 
   const state = {
     face: {
@@ -141,8 +150,20 @@ export function createMotionSmoother(config = {}) {
       alpha
     );
 
-    state.hands.left = smoothHand(state.hands.left, motionState.hands.left, alpha);
-    state.hands.right = smoothHand(state.hands.right, motionState.hands.right, alpha);
+    state.hands.left = smoothHand(
+      state.hands.left,
+      motionState.hands.left,
+      alpha,
+      wristRotSmoothAlpha,
+      fingerCurlSmoothAlpha
+    );
+    state.hands.right = smoothHand(
+      state.hands.right,
+      motionState.hands.right,
+      alpha,
+      wristRotSmoothAlpha,
+      fingerCurlSmoothAlpha
+    );
 
     return {
       ...motionState,
