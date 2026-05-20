@@ -1,3 +1,15 @@
+import {
+  calibrateWrist,
+  kalidokitWristRotation,
+} from "../motion/handPose.js";
+import {
+  makeCnnFixedFingerPose,
+  makeFingerCurlPose,
+  makeFingerOpenPose,
+  makeThumbCurlPose,
+  makeThumbOpenPose,
+} from "./gestureFingerPoses.js";
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -49,10 +61,21 @@ function getUpperArmRotation(motionState, side) {
   const body = motionState.upper_body ?? {};
 
   if (side === "left" && body.left_upper_arm) {
-    return safeRot(body.left_upper_arm);
+    const rot = safeRot(body.left_upper_arm);
+    return {
+      x: clamp(rot.x * 0.75, -1.2, 1.2),
+      y: clamp(rot.y * 0.75, -1.2, 1.2),
+      z: clamp(rot.z * 0.75, -1.5, 1.5),
+    };
   }
+
   if (side === "right" && body.right_upper_arm) {
-    return safeRot(body.right_upper_arm);
+    const rot = safeRot(body.right_upper_arm);
+    return {
+      x: clamp(rot.x * 0.75, -1.2, 1.2),
+      y: clamp(rot.y * 0.75, -1.2, 1.2),
+      z: clamp(rot.z * 0.75, -1.5, 1.5),
+    };
   }
 
   const lift =
@@ -65,34 +88,76 @@ function getUpperArmRotation(motionState, side) {
   };
 }
 
+const LOWER_ARM_UPDOWN_SCALE = 0.6;
+const LOWER_ARM_SIDE_Y_SCALE = 2.0;
+const LOWER_ARM_SIDE_Z_SCALE = 1.3;
+const LOWER_ARM_LEFT_LIFT_OFFSET = 0.6;
+const LOWER_ARM_RIGHT_LIFT_OFFSET = 0.6;
+const LOWER_ARM_ELBOW_BEND_SCALE = 0.45;
+
 function getLowerArmRotation(motionState, side) {
   const body = motionState.upper_body ?? {};
 
-  if (side === "left" && body.left_lower_arm) {
-    return safeRot(body.left_lower_arm);
-  }
-  if (side === "right" && body.right_lower_arm) {
-    return safeRot(body.right_lower_arm);
+  const liftOffset =
+    side === "left"
+      ? LOWER_ARM_LEFT_LIFT_OFFSET
+      : LOWER_ARM_RIGHT_LIFT_OFFSET;
+
+  const lowerArmRot =
+    side === "left" ? body.left_lower_arm : body.right_lower_arm;
+
+  if (lowerArmRot) {
+    const rot = safeRot(lowerArmRot);
+
+    return {
+      x: clamp(rot.x * LOWER_ARM_UPDOWN_SCALE + liftOffset, -1.4, 1.4),
+      y: clamp(rot.y * LOWER_ARM_SIDE_Y_SCALE, -1.4, 1.4),
+      z: clamp(rot.z * LOWER_ARM_SIDE_Z_SCALE, -1.4, 1.4),
+    };
   }
 
   const elbow =
     side === "left" ? body.left_elbow_angle : body.right_elbow_angle;
 
   return {
-    x: 0,
+    x: liftOffset,
     y: 0,
-    z: remapElbowLegacy(elbow, side),
+    z: clamp(remapElbowLegacy(elbow, side) * LOWER_ARM_ELBOW_BEND_SCALE, -1.4, 1.4),
   };
 }
 
+function handUsesCnnPose(handState) {
+  return Boolean(handState?.gesture_cnn_active);
+}
+
 function getHandRotation(motionState, side) {
-  const hands = motionState.hands ?? {};
+  const hand =
+    side === "left" ? motionState.hands?.left : motionState.hands?.right;
 
-  const wristAngle =
-    side === "left"
-      ? hands.left?.wrist_angle
-      : hands.right?.wrist_angle;
+  if (handUsesCnnPose(hand)) {
+    return { x: 0, y: 0, z: 0 };
+  }
 
+  const kkWrist = kalidokitWristRotation(hand?.kalidokit, side);
+  if (
+    kkWrist &&
+    (Number.isFinite(kkWrist.x) ||
+      Number.isFinite(kkWrist.y) ||
+      Number.isFinite(kkWrist.z))
+  ) {
+    return calibrateWrist(kkWrist, side);
+  }
+
+  const hasWristRot =
+    Number.isFinite(hand?.wrist_rot?.x) ||
+    Number.isFinite(hand?.wrist_rot?.y) ||
+    Number.isFinite(hand?.wrist_rot?.z);
+
+  if (hasWristRot) {
+    return calibrateWrist(hand.wrist_rot, side);
+  }
+
+  const wristAngle = hand?.wrist_angle;
   if (!Number.isFinite(wristAngle)) {
     return { x: 0, y: 0, z: 0 };
   }
@@ -100,16 +165,47 @@ function getHandRotation(motionState, side) {
   return {
     x: 0,
     y: 0,
-    z: degToRad(wristAngle),
+    z: degToRad(wristAngle) * 0.35,
   };
 }
 
-function getFingerValue(motionState, side, fingerName) {
-  const hand = side === "left" ? motionState.hands?.left : motionState.hands?.right;
-  return safe(hand?.finger_curl?.[fingerName], 0);
+function makeThumbCurl(curl, side) {
+  const c = clamp(safe(curl, 0), 0, 1);
+  if (c <= 0.05) return makeThumbOpenPose(side);
+  return makeThumbCurlPose(side, c);
+}
+
+function makeFingerCurl(curl, side) {
+  const c = clamp(safe(curl, 0), 0, 1);
+  if (c <= 0.05) return makeFingerOpenPose();
+  if (c < 0.65) return makeFingerCurlPose(side, 0.55);
+  return makeFingerCurlPose(side, c);
+}
+
+function makeHandFingerPoseFromCurl(handState, side) {
+  return {
+    thumb: makeThumbCurl(handState?.finger_curl?.thumb, side),
+    index: makeFingerCurl(handState?.finger_curl?.index, side),
+    middle: makeFingerCurl(handState?.finger_curl?.middle, side),
+    ring: makeFingerCurl(handState?.finger_curl?.ring, side),
+    little: makeFingerCurl(handState?.finger_curl?.pinky, side),
+  };
+}
+
+function makeHandFingerPose(handState, side) {
+  const cnnGesture = handState?.gesture_cnn_active;
+  const cnnPose = makeCnnFixedFingerPose(cnnGesture, side);
+  if (cnnPose) {
+    return cnnPose;
+  }
+
+  return makeHandFingerPoseFromCurl(handState, side);
 }
 
 export function mapMotionStateToAvatarState(motionState) {
+  const leftHand = motionState.hands?.left;
+  const rightHand = motionState.hands?.right;
+
   return {
     lookAt: {
       yaw: safe(motionState.face?.head_yaw, 0),
@@ -119,7 +215,6 @@ export function mapMotionStateToAvatarState(motionState) {
     expressions: {
       blinkLeft: remapBlink(motionState.face?.blink_left),
       blinkRight: remapBlink(motionState.face?.blink_right),
-
       aa: remapMouth(motionState.face?.mouth_open),
       ih: 0,
       ou: 0,
@@ -145,20 +240,8 @@ export function mapMotionStateToAvatarState(motionState) {
     },
 
     fingers: {
-      left: {
-        thumb: getFingerValue(motionState, "left", "thumb"),
-        index: getFingerValue(motionState, "left", "index"),
-        middle: getFingerValue(motionState, "left", "middle"),
-        ring: getFingerValue(motionState, "left", "ring"),
-        pinky: getFingerValue(motionState, "left", "pinky"),
-      },
-      right: {
-        thumb: getFingerValue(motionState, "right", "thumb"),
-        index: getFingerValue(motionState, "right", "index"),
-        middle: getFingerValue(motionState, "right", "middle"),
-        ring: getFingerValue(motionState, "right", "ring"),
-        pinky: getFingerValue(motionState, "right", "pinky"),
-      },
+      left: makeHandFingerPose(leftHand, "left"),
+      right: makeHandFingerPose(rightHand, "right"),
     },
   };
 }

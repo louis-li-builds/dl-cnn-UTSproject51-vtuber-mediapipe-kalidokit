@@ -17,78 +17,6 @@ function degToRadClamped(value, minDeg, maxDeg) {
   return THREE.MathUtils.degToRad(clamped);
 }
 
-function getHumanoidBone(humanoid, boneKey, fallbackName) {
-  if (!humanoid) return null;
-  const name = VRMHumanBoneName?.[boneKey] ?? fallbackName;
-  if (!name) return null;
-  return humanoid.getNormalizedBoneNode(name) ?? null;
-}
-
-function applyFingerCurlToVrm(humanoid, avatarState) {
-  if (!humanoid) return;
-
-  const fingers = avatarState?.fingers ?? {};
-
-  const fingerDefs = [
-    { key: "thumb", bone: "Thumb", max: { p: 55, i: 35, d: 25 } },
-    { key: "index", bone: "Index", max: { p: 70, i: 85, d: 60 } },
-    { key: "middle", bone: "Middle", max: { p: 70, i: 85, d: 60 } },
-    { key: "ring", bone: "Ring", max: { p: 70, i: 85, d: 60 } },
-    { key: "pinky", bone: "Little", max: { p: 70, i: 85, d: 60 } },
-  ];
-
-  const segmentWeight = { p: 0.45, i: 0.35, d: 0.2 };
-  const axisPriority = ["x", "z", "y"];
-  const axisSign = {
-    x: 1,
-    y: 1,
-    z: 1,
-  };
-
-  function applyBend(node, degrees, weight) {
-    if (!node) return;
-    const rad = THREE.MathUtils.degToRad(degrees * weight);
-    for (const axis of axisPriority) {
-      node.rotation.x = 0;
-      node.rotation.y = 0;
-      node.rotation.z = 0;
-      node.rotation[axis] = rad * axisSign[axis];
-      break;
-    }
-  }
-
-  function applySide(sideKey, sidePrefix) {
-    const side = fingers?.[sideKey] ?? {};
-
-    for (const def of fingerDefs) {
-      const curl01 = clamp(safe(side?.[def.key], 0), 0, 1);
-
-      const prox = getHumanoidBone(
-        humanoid,
-        `${sidePrefix}${def.bone}Proximal`,
-        `${sideKey}${def.bone}Proximal`
-      );
-      const inter = getHumanoidBone(
-        humanoid,
-        `${sidePrefix}${def.bone}Intermediate`,
-        `${sideKey}${def.bone}Intermediate`
-      );
-      const dist = getHumanoidBone(
-        humanoid,
-        `${sidePrefix}${def.bone}Distal`,
-        `${sideKey}${def.bone}Distal`
-      );
-
-      if (prox) applyBend(prox, def.max.p * curl01, segmentWeight.p);
-      if (inter) applyBend(inter, def.max.i * curl01, segmentWeight.i);
-      if (dist) applyBend(dist, def.max.d * curl01, segmentWeight.d);
-    }
-  }
-
-  applySide("left", "Left");
-  applySide("right", "Right");
-}
-
 function applyBoneEuler(node, rot, limits = null) {
   if (!node || !rot) return;
 
@@ -104,37 +32,118 @@ function applyBoneEuler(node, rot, limits = null) {
   node.rotation.z = clamp(safe(rot.z, 0), limits.zMin, limits.zMax);
 }
 
+function fingerBoneName(side, finger, segment) {
+  const s = side === "left" ? "Left" : "Right";
+
+  if (finger === "thumb") {
+    if (segment === "metacarpal") return VRMHumanBoneName[`${s}ThumbMetacarpal`];
+    if (segment === "proximal") return VRMHumanBoneName[`${s}ThumbProximal`];
+    return VRMHumanBoneName[`${s}ThumbDistal`];
+  }
+
+  const fingerMap = {
+    index: "Index",
+    middle: "Middle",
+    ring: "Ring",
+    little: "Little",
+  };
+
+  const f = fingerMap[finger];
+  const seg =
+    segment === "proximal"
+      ? "Proximal"
+      : segment === "intermediate"
+        ? "Intermediate"
+        : "Distal";
+
+  return VRMHumanBoneName[`${s}${f}${seg}`];
+}
+
+/** Per-segment finger rotations (Kalidokit / skeleton-style). */
+function applyFingerChain(humanoid, side, fingerData) {
+  if (!humanoid || !fingerData) return;
+
+  const thumbMeta = humanoid.getNormalizedBoneNode(
+    fingerBoneName(side, "thumb", "metacarpal")
+  );
+  applyBoneEuler(thumbMeta, fingerData.thumb?.metacarpal, {
+    xMin: -0.6,
+    xMax: 0.6,
+    yMin: -0.6,
+    yMax: 0.6,
+    zMin: -0.8,
+    zMax: 0.8,
+  });
+
+  const thumbProx = humanoid.getNormalizedBoneNode(
+    fingerBoneName(side, "thumb", "proximal")
+  );
+  applyBoneEuler(thumbProx, fingerData.thumb?.proximal, {
+    xMin: -0.6,
+    xMax: 0.6,
+    yMin: -0.6,
+    yMax: 0.6,
+    zMin: -1.0,
+    zMax: 1.0,
+  });
+
+  const thumbDist = humanoid.getNormalizedBoneNode(
+    fingerBoneName(side, "thumb", "distal")
+  );
+  applyBoneEuler(thumbDist, fingerData.thumb?.distal, {
+    xMin: -0.6,
+    xMax: 0.6,
+    yMin: -0.6,
+    yMax: 0.6,
+    zMin: -0.9,
+    zMax: 0.9,
+  });
+
+  for (const finger of ["index", "middle", "ring", "little"]) {
+    for (const segment of ["proximal", "intermediate", "distal"]) {
+      const node = humanoid.getNormalizedBoneNode(
+        fingerBoneName(side, finger, segment)
+      );
+
+      applyBoneEuler(node, fingerData?.[finger]?.[segment], {
+        xMin: -0.2,
+        xMax: 0.2,
+        yMin: -0.2,
+        yMax: 0.2,
+        zMin: -1.6,
+        zMax: 1.6,
+      });
+    }
+  }
+}
+
 export function applyAvatarStateToVrm(vrm, avatarState) {
   if (!vrm || !avatarState) return;
 
   const humanoid = vrm.humanoid;
   if (humanoid) {
-    const headNode = getHumanoidBone(humanoid, "Head", "head");
+    const headNode = humanoid.getNormalizedBoneNode(VRMHumanBoneName.Head);
 
-    const leftUpperArmNode = getHumanoidBone(
-      humanoid,
-      "LeftUpperArm",
-      "leftUpperArm"
+    const leftUpperArmNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.LeftUpperArm
     );
-    const rightUpperArmNode = getHumanoidBone(
-      humanoid,
-      "RightUpperArm",
-      "rightUpperArm"
+    const rightUpperArmNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.RightUpperArm
     );
 
-    const leftLowerArmNode = getHumanoidBone(
-      humanoid,
-      "LeftLowerArm",
-      "leftLowerArm"
+    const leftLowerArmNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.LeftLowerArm
     );
-    const rightLowerArmNode = getHumanoidBone(
-      humanoid,
-      "RightLowerArm",
-      "rightLowerArm"
+    const rightLowerArmNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.RightLowerArm
     );
 
-    const leftHandNode = getHumanoidBone(humanoid, "LeftHand", "leftHand");
-    const rightHandNode = getHumanoidBone(humanoid, "RightHand", "rightHand");
+    const leftHandNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.LeftHand
+    );
+    const rightHandNode = humanoid.getNormalizedBoneNode(
+      VRMHumanBoneName.RightHand
+    );
 
     if (headNode) {
       headNode.rotation.x = degToRadClamped(
@@ -142,13 +151,11 @@ export function applyAvatarStateToVrm(vrm, avatarState) {
         -30,
         30
       );
-
       headNode.rotation.y = degToRadClamped(
         avatarState.bones?.head?.y,
         -45,
         45
       );
-
       headNode.rotation.z = degToRadClamped(
         avatarState.bones?.head?.z,
         -20,
@@ -193,24 +200,25 @@ export function applyAvatarStateToVrm(vrm, avatarState) {
     });
 
     applyBoneEuler(leftHandNode, avatarState.bones?.leftHand, {
-      xMin: -1.6,
-      xMax: 1.6,
-      yMin: -1.6,
-      yMax: 1.6,
-      zMin: -1.6,
-      zMax: 1.6,
+      xMin: -1.0,
+      xMax: 1.0,
+      yMin: -0.8,
+      yMax: 0.8,
+      zMin: -1.2,
+      zMax: 1.2,
     });
 
     applyBoneEuler(rightHandNode, avatarState.bones?.rightHand, {
-      xMin: -1.6,
-      xMax: 1.6,
-      yMin: -1.6,
-      yMax: 1.6,
-      zMin: -1.6,
-      zMax: 1.6,
+      xMin: -1.0,
+      xMax: 1.0,
+      yMin: -0.8,
+      yMax: 0.8,
+      zMin: -1.2,
+      zMax: 1.2,
     });
 
-    applyFingerCurlToVrm(humanoid, avatarState);
+    applyFingerChain(humanoid, "left", avatarState.fingers?.left);
+    applyFingerChain(humanoid, "right", avatarState.fingers?.right);
   }
 
   const expressionManager = vrm.expressionManager;
@@ -225,26 +233,21 @@ export function applyAvatarStateToVrm(vrm, avatarState) {
       0,
       1
     );
-    const mouthAa = clamp(
-      safe(avatarState.expressions?.aa, 0),
-      0,
-      1
-    );
+    const mouthAa = clamp(safe(avatarState.expressions?.aa, 0), 0, 1);
 
     const hasBlinkLeft =
-      expressionManager.getExpression(VRMExpressionPresetName.BlinkLeft) !== null;
+      expressionManager.getExpression(VRMExpressionPresetName.BlinkLeft) !==
+      null;
     const hasBlinkRight =
-      expressionManager.getExpression(VRMExpressionPresetName.BlinkRight) !== null;
+      expressionManager.getExpression(VRMExpressionPresetName.BlinkRight) !==
+      null;
     const hasBlink =
       expressionManager.getExpression(VRMExpressionPresetName.Blink) !== null;
     const hasAa =
       expressionManager.getExpression(VRMExpressionPresetName.Aa) !== null;
 
     if (hasBlinkLeft) {
-      expressionManager.setValue(
-        VRMExpressionPresetName.BlinkLeft,
-        blinkLeft
-      );
+      expressionManager.setValue(VRMExpressionPresetName.BlinkLeft, blinkLeft);
     }
 
     if (hasBlinkRight) {

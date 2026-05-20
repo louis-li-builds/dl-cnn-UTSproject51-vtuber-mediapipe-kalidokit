@@ -1,0 +1,20 @@
+{
+  "holistic": {
+    "detectMaxWidth": 640
+  },
+  "smoothing": {
+    "mode": "oneEuro",
+    "alpha": 0.3,
+    "oneEuro": {
+      "minCutoff": 1.0,
+      "beta": 0.012,
+      "dCutoff": 1.0
+    }
+  },
+  "forward": {
+    "enabled": false,
+    "url": "ws://127.0.0.1:8765",
+    "intervalMs": 33,
+    "reconnectMs": 3000
+  }
+}

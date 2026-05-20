@@ -20,3 +20,12 @@ build/
 .vite/
 .next/
 
+# training checkpoints (not shipped in this repo)
+*.pth
+*.onnx.data
+
+# ONNX: ignore by default, allow bundled Exp02 demo weights
+*.onnx
+!vtuber-demo/assets/models/gesture/
+!vtuber-demo/assets/models/gesture/hagrid_exp02_vgg.onnx
+

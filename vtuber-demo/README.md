@@ -4,6 +4,10 @@
 
 A small web-based VTuber motion capture demo that uses **MediaPipe Holistic** for tracking, **Kalidokit** for motion solving, and **three.js + three-vrm** to drive a **VRM avatar** in the browser.
 
+Optional **Set A (Exp02)** hand-gesture classification via ONNX runs on a throttled side path (~5 Hz) so Holistic + VRM stay real-time. See [Gesture CNN guide](docs/en/GESTURE_CNN.md).
+
+Runtime tuning: [demo-config.json](demo-config.json) — One Euro smoothing, optional Holistic downscale, optional WebSocket JSON forward. See [DEMO_CONFIG.md](docs/en/DEMO_CONFIG.md).
+
 ---
 
 ## Tech Stack

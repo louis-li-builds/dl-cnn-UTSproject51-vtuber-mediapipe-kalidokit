@@ -55,7 +55,21 @@ function drawPoints(ctx, landmarks, color, radius = 2) {
   }
 }
 
-export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
+/**
+ * @param {object} options
+ * @param {HTMLVideoElement} options.video
+ * @param {HTMLElement} options.stage
+ * @param {(s: string) => void} [options.onLog]
+ * @param {(trackingResult: object) => void} [options.onFrame]
+ * @param {number} [options.detectMaxWidth] if > 0, run Holistic on a downscaled canvas (same aspect as video) for speed/stability
+ */
+export async function initHolisticTracking({
+  video,
+  stage,
+  onLog,
+  onFrame,
+  detectMaxWidth = 0,
+}) {
   if (!video) throw new Error("Video element is required.");
   if (!stage) throw new Error("Tracking stage is required.");
 
@@ -79,6 +93,13 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
   const canvas = createOverlayCanvas(stage);
   const ctx = canvas.getContext("2d");
 
+  const useDownscale =
+    Number.isFinite(detectMaxWidth) && detectMaxWidth > 0;
+  const detectCanvas = useDownscale ? document.createElement("canvas") : null;
+  const detectCtx = useDownscale
+    ? detectCanvas.getContext("2d", { willReadFrequently: true })
+    : null;
+
   let lastVideoTime = -1;
   let rafId = null;
 
@@ -94,7 +115,29 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
       lastVideoTime = video.currentTime;
 
       const nowMs = performance.now();
-      const rawResult = holisticLandmarker.detectForVideo(video, nowMs);
+      let detectSource = video;
+
+      if (
+        useDownscale &&
+        detectCanvas &&
+        detectCtx &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0
+      ) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const maxW = Math.min(Math.floor(detectMaxWidth), vw);
+        const tw = maxW;
+        const th = Math.max(1, Math.round((tw * vh) / vw));
+        if (detectCanvas.width !== tw || detectCanvas.height !== th) {
+          detectCanvas.width = tw;
+          detectCanvas.height = th;
+        }
+        detectCtx.drawImage(video, 0, 0, tw, th);
+        detectSource = detectCanvas;
+      }
+
+      const rawResult = holisticLandmarker.detectForVideo(detectSource, nowMs);
       const trackingResult = buildTrackingResult(rawResult, nowMs);
 
       const face = trackingResult.face.landmarks;
@@ -114,8 +157,13 @@ export async function initHolisticTracking({ video, stage, onLog, onFrame }) {
       }
 
       if (onLog) {
+        const det =
+          detectSource === video
+            ? `${video.videoWidth}×${video.videoHeight}`
+            : `${detectCanvas.width}×${detectCanvas.height} (maxW=${detectMaxWidth})`;
         onLog(
           "Holistic tracking active.\n" +
+            `Detection source: ${det}\n` +
             `Face landmarks: ${face.length}\n` +
             `Pose landmarks: ${pose.length}\n` +
             `Left hand landmarks: ${leftHand.length}\n` +

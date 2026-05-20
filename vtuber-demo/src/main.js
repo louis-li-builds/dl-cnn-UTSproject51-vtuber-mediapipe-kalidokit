@@ -6,6 +6,9 @@ import { createSceneRuntime } from "./render/scene.js";
 import { loadVrmModel } from "./avatar/vrmLoader.js";
 import { mapMotionStateToAvatarState } from "./avatar/vrmMapper.js";
 import { applyAvatarStateToVrm } from "./avatar/vrmDriver.js";
+import { createGestureClassifier } from "./gesture/gestureClassifier.js";
+import { applyCnnGestureToMotionState } from "./gesture/applyCnnGesture.js";
+import { createMocapForward } from "./forward/mocapForward.js";
 
 const refs = {
   status: document.getElementById("status"),
@@ -16,14 +19,54 @@ const refs = {
   debugPanel: document.getElementById("debug-panel"),
 };
 
+const DEFAULT_DEMO_CONFIG = {
+  holistic: {
+    detectMaxWidth: 640,
+  },
+  smoothing: {
+    mode: "oneEuro",
+    alpha: 0.3,
+    oneEuro: {
+      minCutoff: 1.0,
+      beta: 0.012,
+      dCutoff: 1.0,
+    },
+  },
+  forward: {
+    enabled: false,
+    url: "ws://127.0.0.1:8765",
+    intervalMs: 33,
+    reconnectMs: 3000,
+  },
+};
+
+function mergeDemoConfig(base, user) {
+  if (!user || typeof user !== "object") return base;
+  return {
+    ...base,
+    ...user,
+    holistic: { ...base.holistic, ...user.holistic },
+    smoothing: {
+      ...base.smoothing,
+      ...user.smoothing,
+      oneEuro: {
+        ...base.smoothing.oneEuro,
+        ...user.smoothing?.oneEuro,
+      },
+    },
+    forward: { ...base.forward, ...user.forward },
+  };
+}
+
 const appState = {
   webcam: null,
   sceneRuntime: null,
+  gestureClassifier: null,
+  gestureConfig: null,
+  demoConfig: DEFAULT_DEMO_CONFIG,
+  motionSmoother: null,
+  mocapForward: null,
 };
-
-const faceSmoother = createMotionSmoother({
-  alpha: 0.35,
-});
 
 const motionInfo = document.createElement("pre");
 motionInfo.style.whiteSpace = "pre-wrap";
@@ -53,8 +96,18 @@ function formatNumber(value, digits = 3) {
 function renderTrackingResult(trackingResult) {
   const video = appState.webcam?.video ?? null;
 
+  appState.gestureClassifier?.schedule(video, trackingResult);
+
   const rawMotionState = buildMotionState(trackingResult, video);
-  const motionState = faceSmoother.update(rawMotionState);
+  const motionState = appState.motionSmoother
+    ? appState.motionSmoother.update(rawMotionState)
+    : rawMotionState;
+
+  applyCnnGestureToMotionState(
+    motionState,
+    appState.gestureClassifier?.getSnapshot(),
+    appState.gestureConfig
+  );
 
   const avatarState = mapMotionStateToAvatarState(motionState);
   const currentVrm = appState.sceneRuntime?.currentVrm ?? null;
@@ -63,7 +116,12 @@ function renderTrackingResult(trackingResult) {
     applyAvatarStateToVrm(currentVrm, avatarState);
   }
 
+  appState.mocapForward?.send(avatarState, trackingResult.timestamp);
+
+  const cfg = appState.demoConfig ?? DEFAULT_DEMO_CONFIG;
   motionInfo.textContent = `timestamp: ${Math.round(trackingResult.timestamp)}
+demo: holistic.maxW=${cfg.holistic?.detectMaxWidth ?? 0} smoothing=${cfg.smoothing?.mode ?? "?"}
+forward: ${appState.mocapForward?.enabled ? cfg.forward?.url : "off"}
 
 [tracking.face]
 detected: ${trackingResult.face.detected}
@@ -104,6 +162,9 @@ right_elbow_angle: ${formatNumber(
 [motion.hands.left]
 wrist_angle: ${formatNumber(motionState.hands?.left?.wrist_angle, 2)}
 gesture_basic: ${motionState.hands?.left?.gesture_basic ?? "null"}
+gesture_cnn: ${motionState.hands?.left?.gesture_cnn ?? "null"}
+gesture_cnn_active: ${motionState.hands?.left?.gesture_cnn_active ?? "null"}
+gesture_cnn_conf: ${formatNumber(motionState.hands?.left?.gesture_cnn_confidence)}
 palm_open: ${formatNumber(motionState.hands?.left?.palm_open)}
 pinch_distance: ${formatNumber(motionState.hands?.left?.pinch_distance)}
 thumb_curl: ${formatNumber(motionState.hands?.left?.finger_curl?.thumb)}
@@ -115,6 +176,9 @@ pinky_curl: ${formatNumber(motionState.hands?.left?.finger_curl?.pinky)}
 [motion.hands.right]
 wrist_angle: ${formatNumber(motionState.hands?.right?.wrist_angle, 2)}
 gesture_basic: ${motionState.hands?.right?.gesture_basic ?? "null"}
+gesture_cnn: ${motionState.hands?.right?.gesture_cnn ?? "null"}
+gesture_cnn_active: ${motionState.hands?.right?.gesture_cnn_active ?? "null"}
+gesture_cnn_conf: ${formatNumber(motionState.hands?.right?.gesture_cnn_confidence)}
 palm_open: ${formatNumber(motionState.hands?.right?.palm_open)}
 pinch_distance: ${formatNumber(motionState.hands?.right?.pinch_distance)}
 thumb_curl: ${formatNumber(motionState.hands?.right?.finger_curl?.thumb)}
@@ -128,6 +192,20 @@ async function bootApp() {
   try {
     setStatus("Booting…");
     setLog("Loading application modules…\nRequesting camera access…");
+
+    let demoCfg = DEFAULT_DEMO_CONFIG;
+    try {
+      const res = await fetch("./demo-config.json");
+      if (res.ok) {
+        const userCfg = await res.json();
+        demoCfg = mergeDemoConfig(DEFAULT_DEMO_CONFIG, userCfg);
+      }
+    } catch {
+      /* use defaults */
+    }
+    appState.demoConfig = demoCfg;
+    appState.motionSmoother = createMotionSmoother(demoCfg.smoothing ?? {});
+    appState.mocapForward = createMocapForward(demoCfg.forward ?? {});
 
     const webcam = await initWebcam(refs.inputPanel);
     appState.webcam = webcam;
@@ -143,6 +221,8 @@ async function bootApp() {
         `Camera: ${webcam.video.videoWidth}×${webcam.video.videoHeight}\n` +
           "3D scene ready.\n" +
           "VRM model loaded.\n" +
+          `Smoothing: ${demoCfg.smoothing?.mode ?? "oneEuro"}\n` +
+          `Holistic detectMaxWidth: ${demoCfg.holistic?.detectMaxWidth ?? 0}\n` +
           "Starting holistic tracker…"
       );
     } catch (vrmError) {
@@ -158,11 +238,35 @@ async function bootApp() {
 
     setStatus("Camera ready");
 
+    try {
+      const gestureConfig = await fetch(
+        "./assets/models/gesture/gesture-model.json"
+      ).then((r) => r.json());
+      appState.gestureConfig = gestureConfig;
+      const gestureClassifier = createGestureClassifier(gestureConfig);
+      await gestureClassifier.init();
+      appState.gestureClassifier = gestureClassifier;
+      const snap = gestureClassifier.getSnapshot();
+      setLog(
+        (refs.log.textContent || "") +
+          `\nGesture CNN (Set A Exp02): ${
+            snap.enabled ? "ready" : `disabled (${snap.disabledReason})`
+          }`
+      );
+    } catch (gestureError) {
+      console.warn(gestureError);
+      setLog(
+        (refs.log.textContent || "") +
+          `\nGesture CNN: disabled (${gestureError.message})`
+      );
+    }
+
     await initHolisticTracking({
       video: webcam.video,
       stage: webcam.stage,
       onLog: setLog,
       onFrame: renderTrackingResult,
+      detectMaxWidth: demoCfg.holistic?.detectMaxWidth ?? 0,
     });
 
     setStatus("Running");

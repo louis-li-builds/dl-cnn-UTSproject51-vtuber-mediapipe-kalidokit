@@ -56,6 +56,10 @@ Open the printed URL (often **http://localhost:3000**), allow webcam access.
 
 ---
 
+## Set A gesture CNN (optional)
+
+See [vtuber-demo/docs/en/GESTURE_CNN.md](../vtuber-demo/docs/en/GESTURE_CNN.md) for exporting Exp02 to ONNX and running the throttled browser classifier.
+
 ## Pipeline (short)
 
 1. **Boot** (`src/main.js`): webcam → three.js scene → load VRM → Holistic tracker.

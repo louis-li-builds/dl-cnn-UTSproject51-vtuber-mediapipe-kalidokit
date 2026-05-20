@@ -1,4 +1,8 @@
 import * as Kalidokit from "https://cdn.jsdelivr.net/npm/kalidokit@1.1.5/dist/kalidokit.es.js";
+import {
+  estimateWristRotation,
+  solveKalidokitHand,
+} from "./handPose.js";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -319,11 +323,12 @@ function classifyBasicGesture(fingerCurl, pinchDistance) {
   return "mixed";
 }
 
-function solveHand(handLandmarks) {
+function solveHand(handLandmarks, handWorldLandmarks, side) {
   if (!handLandmarks || handLandmarks.length === 0) {
     return {
       detected: false,
       wrist_angle: null,
+      wrist_rot: { x: null, y: null, z: null },
       palm_open: null,
       pinch_distance: null,
       gesture_basic: "unknown",
@@ -334,6 +339,7 @@ function solveHand(handLandmarks) {
         ring: null,
         pinky: null,
       },
+      kalidokit: null,
       raw: null,
     };
   }
@@ -356,14 +362,18 @@ function solveHand(handLandmarks) {
   const pinchDistance = calculatePinchDistance(handLandmarks);
   const gestureBasic = classifyBasicGesture(fingerCurl, pinchDistance);
   const wristAngle = calculateWristAngle2D(handLandmarks);
+  const wristRot = estimateWristRotation(handLandmarks, handWorldLandmarks, side);
+  const kalidokit = solveKalidokitHand(handLandmarks, side);
 
   return {
     detected: true,
     wrist_angle: wristAngle,
+    wrist_rot: wristRot,
     palm_open: palmOpen,
     pinch_distance: pinchDistance,
     gesture_basic: gestureBasic,
     finger_curl: fingerCurl,
+    kalidokit,
     raw: handLandmarks,
   };
 }
@@ -374,11 +384,13 @@ export function buildMotionState(trackingResult, video = null) {
   const poseWorldLandmarks = trackingResult.pose?.worldLandmarks ?? [];
   const leftHandLandmarks = trackingResult.hands?.left?.landmarks ?? [];
   const rightHandLandmarks = trackingResult.hands?.right?.landmarks ?? [];
+  const leftHandWorldLandmarks = trackingResult.hands?.left?.worldLandmarks ?? [];
+  const rightHandWorldLandmarks = trackingResult.hands?.right?.worldLandmarks ?? [];
 
   const face = solveFace(faceLandmarks, video);
   const pose = solvePose(poseLandmarks, poseWorldLandmarks, video);
-  const leftHand = solveHand(leftHandLandmarks);
-  const rightHand = solveHand(rightHandLandmarks);
+  const leftHand = solveHand(leftHandLandmarks, leftHandWorldLandmarks, "left");
+  const rightHand = solveHand(rightHandLandmarks, rightHandWorldLandmarks, "right");
 
   const leftElbowAngle = calculateElbowAngle(poseLandmarks, "left");
   const rightElbowAngle = calculateElbowAngle(poseLandmarks, "right");
