@@ -1,18 +1,34 @@
 ## VTuber Motion Capture Demo
 
-[Project overview](../README.md) · [Documentation hub](../docs/README.md) · [English guide](../docs/en/README.md) · [繁體中文](../docs/zh-TW/README.md)
+[Project overview](../README.md) · [Documentation hub](../docs/README.md)
 
-A small web-based VTuber motion capture demo that uses **MediaPipe Holistic** for tracking, **Kalidokit** for motion solving, and **three.js + three-vrm** to drive a **VRM avatar** in the browser.
+A browser VTuber demo: **MediaPipe Holistic** → **Kalidokit** → **three.js + @pixiv/three-vrm** driving a **VRM** avatar.
+
+### UI: Figma shell (this folder)
+
+The runnable app uses **Vite + React + Tailwind** (layout from `internal-doc/figma/`). The tracking / VRM pipeline lives under `src/pipeline/` and is booted from `src/pipeline/boot.js`, wired into the React shell via `src/app/hooks/useVtuberPipeline.ts`.
+
+```bash
+cd vtuber-demo
+npm install
+npm run dev    # dev server (camera + HTTPS/localhost as required by browsers)
+npm run build  # production bundle → dist/
+```
+
+VRM files are served from `public/assets` → `../assets/models/` (symlink). Design source of truth for the shell remains in **`internal-doc/figma/`** (not committed per repo `.gitignore`).
 
 ---
 
-## Tech Stack
+## Tech Stack (legacy note)
+
+The following described the **older vanilla ESM + import map** layout; the **current** stack is **Vite + React** with **npm** `three` / `@pixiv/three-vrm` / `kalidokit`.
 
 - **Frontend / Web**
   - **HTML / CSS / Vanilla JS (ES Modules)**  
     Pure front-end, modular JavaScript without any framework.
   - **Import Maps**  
     Uses `<script type="importmap">` to point to CDN sources (three.js / three-vrm).
+
 
 - **3D Rendering**
   - **three.js**  

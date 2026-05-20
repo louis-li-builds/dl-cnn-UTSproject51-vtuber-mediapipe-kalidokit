@@ -1,0 +1,43 @@
+import { Camera, Maximize2 } from 'lucide-react';
+
+interface WebcamPreviewProps {
+  isPrimary: boolean;
+  onSwapView: () => void;
+  onMountReady: (el: HTMLElement | null) => void;
+}
+
+export function WebcamPreview({
+  isPrimary,
+  onSwapView,
+  onMountReady,
+}: WebcamPreviewProps) {
+  return (
+    <div className="h-full flex flex-col bg-zinc-900 rounded-lg overflow-hidden">
+      <div className="flex items-center justify-between p-3 bg-zinc-800 border-b border-zinc-700">
+        <h3 className="text-sm text-zinc-100 flex items-center gap-2">
+          <Camera className="w-4 h-4" />
+          Webcam Input
+          {isPrimary && (
+            <span className="px-2 py-0.5 bg-blue-600 text-white text-xs rounded">
+              Primary
+            </span>
+          )}
+        </h3>
+        <button
+          type="button"
+          onClick={onSwapView}
+          className="p-2 rounded-md bg-zinc-700 hover:bg-zinc-600 text-zinc-100 transition-colors"
+          title="Swap primary/secondary view"
+        >
+          <Maximize2 className="w-4 h-4" />
+        </button>
+      </div>
+
+      <div
+        ref={onMountReady}
+        id="webcam-root"
+        className="flex-1 min-h-0 bg-zinc-950 relative overflow-hidden"
+      />
+    </div>
+  );
+}

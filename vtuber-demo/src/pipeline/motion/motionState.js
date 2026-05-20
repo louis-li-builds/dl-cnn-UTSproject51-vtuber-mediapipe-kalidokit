@@ -1,4 +1,4 @@
-import * as Kalidokit from "https://cdn.jsdelivr.net/npm/kalidokit@1.1.5/dist/kalidokit.es.js";
+import * as Kalidokit from "kalidokit";
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));

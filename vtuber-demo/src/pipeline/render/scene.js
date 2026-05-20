@@ -91,15 +91,33 @@ export function createSceneRuntime(container) {
     renderer.render(scene, camera);
   }
 
+  let rafId = null;
+
   function tick() {
     update();
     render();
-    requestAnimationFrame(tick);
+    rafId = requestAnimationFrame(tick);
   }
 
   function start() {
     resize();
     tick();
+  }
+
+  function dispose() {
+    if (rafId != null) {
+      cancelAnimationFrame(rafId);
+      rafId = null;
+    }
+    window.removeEventListener("resize", resize);
+    setVrm(null);
+    renderer.dispose();
+    if (renderer.domElement.parentNode) {
+      renderer.domElement.parentNode.removeChild(renderer.domElement);
+    }
+    if (view.parentNode) {
+      view.parentNode.removeChild(view);
+    }
   }
 
   window.addEventListener("resize", resize);
@@ -115,5 +133,6 @@ export function createSceneRuntime(container) {
     setVrm,
     start,
     resize,
+    dispose,
   };
 }
