@@ -34,8 +34,8 @@ export default function App() {
         fps={runtime.isConnected ? 60 : 0}
       />
 
-      <div className="flex-1 overflow-hidden">
-        <PanelGroup direction="horizontal">
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <PanelGroup direction="horizontal" className="h-full w-full min-h-0">
           {!isLeftSidebarCollapsed && (
             <>
               <Panel defaultSize={15} minSize={10} maxSize={25}>
@@ -66,9 +66,9 @@ export default function App() {
             </div>
           )}
 
-          <Panel minSize={40}>
-            <PanelGroup direction="vertical">
-              <Panel defaultSize={70} minSize={40}>
+          <Panel minSize={40} className="min-h-0 overflow-hidden">
+            <PanelGroup direction="vertical" className="h-full min-h-0">
+              <Panel defaultSize={70} minSize={40} className="min-h-0 overflow-hidden">
                 <div className="h-full p-4">
                   <div className="h-full flex gap-4">
                     <div className={isPrimaryViewAvatar ? 'w-1/3' : 'flex-1'}>

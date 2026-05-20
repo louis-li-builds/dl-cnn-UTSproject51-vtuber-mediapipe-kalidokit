@@ -6,15 +6,18 @@ export function createSceneRuntime(container) {
   }
 
   container.innerHTML = "";
+  /** Fill the React panel: parent is often not a flex container, so flex:1 on the canvas root does nothing. */
   container.style.position = "relative";
   container.style.overflow = "hidden";
+  container.style.width = "100%";
+  container.style.height = "100%";
   container.style.minHeight = "0";
 
   const view = document.createElement("div");
-  view.style.position = "relative";
-  view.style.flex = "1";
-  view.style.minHeight = "0";
+  view.style.position = "absolute";
+  view.style.inset = "0";
   view.style.width = "100%";
+  view.style.height = "100%";
   container.appendChild(view);
 
   const readViewSize = () => {
@@ -80,6 +83,18 @@ export function createSceneRuntime(container) {
     renderer.setSize(nextWidth, nextHeight);
   }
 
+  const resizeObserver =
+    typeof ResizeObserver !== "undefined"
+      ? new ResizeObserver(() => {
+          resize();
+        })
+      : null;
+  if (resizeObserver) {
+    resizeObserver.observe(container);
+  }
+
+  window.addEventListener("resize", resize);
+
   function update() {
     const delta = clock.getDelta();
     if (currentVrm) {
@@ -109,6 +124,7 @@ export function createSceneRuntime(container) {
       cancelAnimationFrame(rafId);
       rafId = null;
     }
+    resizeObserver?.disconnect();
     window.removeEventListener("resize", resize);
     setVrm(null);
     renderer.dispose();
@@ -119,8 +135,6 @@ export function createSceneRuntime(container) {
       view.parentNode.removeChild(view);
     }
   }
-
-  window.addEventListener("resize", resize);
 
   return {
     scene,

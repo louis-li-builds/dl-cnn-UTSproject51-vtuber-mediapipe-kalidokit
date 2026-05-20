@@ -66,7 +66,7 @@ export async function initHolisticTracking({
   if (!video) throw new Error("Video element is required.");
   if (!stage) throw new Error("Tracking stage is required.");
 
-  const vision = await import(TASKS_VISION_URL);
+  const vision = await import(/* @vite-ignore */ TASKS_VISION_URL);
   const { FilesetResolver, HolisticLandmarker, HandLandmarker } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(WASM_ROOT);

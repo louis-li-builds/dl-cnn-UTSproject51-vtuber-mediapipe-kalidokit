@@ -123,6 +123,7 @@ export async function bootVtuberPipeline({
         return;
       }
       sceneRuntime.setVrm(vrm);
+      sceneRuntime.resize();
       setLog(`VRM loaded: ${modelPath}`);
     } catch (error) {
       console.error(error);

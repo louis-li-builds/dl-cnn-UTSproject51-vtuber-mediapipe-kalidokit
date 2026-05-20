@@ -23,9 +23,9 @@ export const AVATAR_CATALOG = [
   },
   {
     id: "6",
-    name: "Default (Avocado)",
+    name: "Default",
     thumbnail: "👤",
-    modelPath: "/assets/models/Avocado.vrm",
+    modelPath: "/assets/models/avatar.vrm",
   },
 ];
 
