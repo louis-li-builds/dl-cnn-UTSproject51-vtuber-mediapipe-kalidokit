@@ -20,15 +20,14 @@
     "rock",
     "stop"
   ],
-  "inferenceIntervalMs": 150,
-  "minConfidence": 0.45,
-  "stableFrames": 3,
+  "inferenceIntervalMs": 120,
+  "minConfidence": 0.4,
+  "stableFrames": 2,
   "cropMargin": 0.08,
-  "preferHand": "right",
   "poseOverride": {
     "enabled": true,
-    "useStableLabel": true,
-    "minConfidence": 0.5,
+    "useStableLabel": false,
+    "minConfidence": 0.42,
     "lockWrist": true,
     "gestures": [
       "fist",

@@ -1,6 +1,6 @@
 /**
- * Freeze branch — minimal workflow:
- * webcam → VRM → log + motion UI → MediaPipe → (optional ONNX schedule) → export → VRM
+ * Figma UI + skeleton tracking + Exp02 HAGRID ONNX (12 classes, both hands).
+ * No teammate RPS layer on this branch. Finger poses: CNN > landmark curl.
  */
 import { initWebcam, releaseAllWebcamTracks } from "./tracking/webcam.js";
 import { initHolisticTracking } from "./tracking/holistic.js";
@@ -19,11 +19,16 @@ import { createMocapForward } from "./forward/mocapForward.js";
 
 const DEFAULT_CONFIG = {
   holistic: { detectMaxWidth: 640 },
-  tracking: { swapHandSides: false },
+  tracking: { swapHandSides: true },
   webcam: { videoProfile: "compact", objectFit: "contain", digitalZoom: 1 },
-  gesture: { enabled: false },
+  gesture: { enabled: true },
   forward: { enabled: false, url: "ws://127.0.0.1:8765", intervalMs: 33 },
-  smoothing: { mode: "lerp", alpha: 0.35 },
+  smoothing: {
+    mode: "lerp",
+    alpha: 0.35,
+    wristRotSmoothAlpha: 0.19,
+    fingerCurlSmoothAlpha: 0.52,
+  },
 };
 
 function mergeConfig(base, user) {
@@ -47,15 +52,26 @@ function formatNumber(value, digits = 3) {
   return Number(value).toFixed(digits);
 }
 
+function formatCnnLine(side, snap) {
+  if (!snap?.label && !snap?.rawLabel) {
+    return `${side}: — conf=${formatNumber(snap?.rawConfidence)}`;
+  }
+  return `${side}: active=${snap.label ?? "—"} raw=${snap.rawLabel ?? "—"} conf=${formatNumber(snap.confidence ?? snap.rawConfidence)} lat=${formatNumber(snap.latencyMs, 1)}ms`;
+}
+
 function formatMotionPanel(trackingResult, motionState, extras = {}) {
   const snap = extras.gestureSnap;
   return `timestamp: ${Math.round(trackingResult.timestamp)}
-gesture: ${snap?.enabled ? (snap.label ?? "—") : "off"} conf=${formatNumber(snap?.confidence)}
-forward: ${extras.forwardOn ? "on" : "off"}
+pipeline: skeleton+handLandmarker | exp02=${extras.gestureOn ? "on" : "off"} (no RPS)
+finger_pose: Exp02 CNN > landmarks
 
 [tracking.hands]
-L ${trackingResult.hands.left.detected ? "on" : "off"} n=${trackingResult.hands.left.count}
-R ${trackingResult.hands.right.detected ? "on" : "off"} n=${trackingResult.hands.right.count}
+L ${trackingResult.hands.left.detected ? "on" : "off"} n=${trackingResult.hands.left.count} src=${trackingResult.hands.left.source ?? "—"}
+R ${trackingResult.hands.right.detected ? "on" : "off"} n=${trackingResult.hands.right.count} src=${trackingResult.hands.right.source ?? "—"}
+
+[exp02 cnn]
+${formatCnnLine("left", snap?.left)}
+${formatCnnLine("right", snap?.right)}
 
 [motion.face]
 head_yaw: ${formatNumber(motionState.face?.head_yaw)}
@@ -64,10 +80,12 @@ mouth_open: ${formatNumber(motionState.face?.mouth_open)}
 [motion.hands.left]
 gesture_basic: ${motionState.hands?.left?.gesture_basic ?? "null"}
 gesture_cnn: ${motionState.hands?.left?.gesture_cnn ?? "null"}
+gesture_cnn_active: ${motionState.hands?.left?.gesture_cnn_active ?? "null"} locked=${motionState.hands?.left?.gesture_cnn_pose_locked ?? false}
 
 [motion.hands.right]
 gesture_basic: ${motionState.hands?.right?.gesture_basic ?? "null"}
-gesture_cnn: ${motionState.hands?.right?.gesture_cnn ?? "null"}`;
+gesture_cnn: ${motionState.hands?.right?.gesture_cnn ?? "null"}
+gesture_cnn_active: ${motionState.hands?.right?.gesture_cnn_active ?? "null"} locked=${motionState.hands?.right?.gesture_cnn_pose_locked ?? false}`;
 }
 
 export async function bootVtuberPipeline({
@@ -105,7 +123,7 @@ export async function bootVtuberPipeline({
       }
 
       const rawMotion = buildMotionState(trackingResult, video);
-      const motionState = appState.motionSmoother
+      let motionState = appState.motionSmoother
         ? appState.motionSmoother.update(rawMotion)
         : rawMotion;
 
@@ -128,11 +146,10 @@ export async function bootVtuberPipeline({
       const now = performance.now();
       if (now - lastMotionUiMs >= MOTION_UI_MS) {
         lastMotionUiMs = now;
-        const snap = appState.gestureClassifier?.getSnapshot?.();
         patchRuntime({
           motionText: formatMotionPanel(trackingResult, motionState, {
-            gestureSnap: snap,
-            forwardOn: Boolean(appState.mocapForward?.enabled),
+            gestureSnap: appState.gestureClassifier?.getSnapshot?.(),
+            gestureOn: Boolean(appState.gestureClassifier?.getSnapshot?.()?.enabled),
           }),
         });
       }
@@ -164,7 +181,7 @@ export async function bootVtuberPipeline({
 
   try {
     setStatus("Booting…");
-    logSystem("boot", "Pipeline starting (freeze-6h)…");
+    logSystem("boot", "Branch demo/skeleton-ui-exp02-onnx — Exp02 CNN + skeleton tracking");
 
     let demoCfg = DEFAULT_CONFIG;
     try {
@@ -207,8 +224,8 @@ export async function bootVtuberPipeline({
 
     setStatus("Camera ready");
 
-    if (demoCfg.gesture?.enabled) {
-      logSystem("gesture", "Loading ONNX…");
+    if (demoCfg.gesture?.enabled !== false) {
+      logSystem("gesture", "Loading HAGRID ONNX…");
       try {
         const gestureConfig = await fetch(
           "/assets/models/gesture/gesture-model.json"
@@ -224,34 +241,29 @@ export async function bootVtuberPipeline({
         const classifier = createGestureClassifier(appState.gestureConfig);
         await classifier.init();
         appState.gestureClassifier = classifier;
-        const snap = classifier.getSnapshot();
-        logSystem(
-          "gesture",
-          snap.enabled
-            ? "CNN ready (non-blocking)"
-            : `off — ${snap.disabledReason ?? "?"}`
-        );
+        logSystem("gesture", "Exp02 ready — both hands, no RPS");
       } catch (e) {
         logSystem("gesture", `off — ${e?.message ?? e}`);
       }
-    } else {
-      logSystem("gesture", "disabled (set gesture.enabled in demo-config)");
     }
 
-    logSystem("track", "Starting Holistic…");
+    logSystem("track", "Holistic + HandLandmarker…");
     const trackingHandle = await initHolisticTracking({
       video: webcam.video,
       stage: webcam.stage,
       detectMaxWidth: demoCfg.holistic?.detectMaxWidth ?? 640,
       onFrame: renderTrackingResult,
       getTrackingOptions: () => ({
-        swapHandSides: Boolean(demoCfg.tracking?.swapHandSides),
+        swapHandSides: demoCfg.tracking?.swapHandSides !== false,
       }),
     });
     appState.trackingHandle = trackingHandle;
 
     setStatus("Running");
-    logSystem("boot", "Running — move in front of the camera");
+    logSystem(
+      "boot",
+      "Running — Exp02 CNN drives finger poses when confident (non-blocking)"
+    );
   } catch (error) {
     console.error(error);
     setStatus("Boot failed");
@@ -275,3 +287,4 @@ export async function bootVtuberPipeline({
     },
   };
 }
+

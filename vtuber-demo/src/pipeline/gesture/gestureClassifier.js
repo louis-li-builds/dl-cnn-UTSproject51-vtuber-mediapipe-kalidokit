@@ -1,4 +1,4 @@
-﻿import { cropHandFromVideo, pickHandForGesture } from "./handCrop.js";
+﻿import { cropHandFromVideo } from "./handCrop.js";
 
 const ORT_CDN = "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/ort.min.mjs";
 
@@ -30,9 +30,31 @@ function canvasToTensor(canvas, imgSize, normalize) {
   return tensor;
 }
 
+function createSideChannel() {
+  return {
+    busy: false,
+    lastRunMs: 0,
+    latest: { label: null, confidence: null, latencyMs: null },
+    raw: { label: null, confidence: null },
+    stableLabel: null,
+    stableCount: 0,
+  };
+}
+
+function emptySideSnapshot() {
+  return {
+    label: null,
+    confidence: null,
+    stableLabel: null,
+    stableConfidence: null,
+    rawLabel: null,
+    rawConfidence: null,
+    latencyMs: null,
+  };
+}
+
 /**
- * Set A (Exp02) gesture classifier: throttled ONNX on a hand crop.
- * Holistic + VRM stay on the animation frame loop; CNN runs at most ~5 Hz.
+ * Exp02 HAGRID classifier — per-hand ONNX (left + right), non-blocking schedule().
  */
 export function createGestureClassifier(config) {
   const state = {
@@ -40,26 +62,13 @@ export function createGestureClassifier(config) {
     disabledReason: "not loaded",
     session: null,
     ort: null,
-    busy: false,
-    lastRunMs: 0,
-    pending: false,
-    latest: {
-      label: null,
-      confidence: null,
-      side: null,
-      latencyMs: null,
-    },
-    raw: {
-      label: null,
-      confidence: null,
-    },
-    stableLabel: null,
-    stableCount: 0,
+    left: createSideChannel(),
+    right: createSideChannel(),
   };
 
   async function loadOrt() {
     if (state.ort) return state.ort;
-    state.ort = await import(/* webpackIgnore: true */ ORT_CDN);
+    state.ort = await import(/* @vite-ignore */ ORT_CDN);
     state.ort.env.wasm.wasmPaths =
       "https://cdn.jsdelivr.net/npm/onnxruntime-web@1.22.0/dist/";
     return state.ort;
@@ -87,41 +96,54 @@ export function createGestureClassifier(config) {
     return state;
   }
 
-  function updateStable(label, confidence) {
-    if (label === state.stableLabel) {
-      state.stableCount += 1;
+  function updateStable(channel, label, confidence) {
+    if (label === channel.stableLabel) {
+      channel.stableCount += 1;
     } else {
-      state.stableLabel = label;
-      state.stableCount = 1;
+      channel.stableLabel = label;
+      channel.stableCount = 1;
     }
 
-    if (state.stableCount >= config.stableFrames && confidence >= config.minConfidence) {
-      state.latest.label = label;
-      state.latest.confidence = confidence;
+    if (
+      channel.stableCount >= config.stableFrames &&
+      confidence >= config.minConfidence
+    ) {
+      channel.latest.label = label;
+      channel.latest.confidence = confidence;
     } else if (confidence < config.minConfidence * 0.75) {
-      state.latest.label = null;
-      state.latest.confidence = confidence;
+      channel.latest.label = null;
+      channel.latest.confidence = confidence;
     }
   }
 
-  async function runInference(video, trackingResult) {
-    if (!state.ready || state.busy || !state.session) return;
+  async function runInferenceForSide(video, trackingResult, side) {
+    if (!state.ready || !state.session) return;
 
-    const picked = pickHandForGesture(trackingResult, config.preferHand);
-    if (!picked) {
-      state.latest.side = null;
+    const channel = state[side];
+    const hand = trackingResult?.hands?.[side];
+    if (!hand?.detected || !hand.landmarks?.length) {
+      channel.latest.label = null;
+      channel.latest.confidence = null;
+      channel.raw.label = null;
+      channel.raw.confidence = null;
+      return;
+    }
+
+    const now = performance.now();
+    if (channel.busy || now - channel.lastRunMs < config.inferenceIntervalMs) {
       return;
     }
 
     const crop = cropHandFromVideo({
       video,
-      landmarks: picked.landmarks,
+      landmarks: hand.landmarks,
       outSize: config.imgSize,
       margin: config.cropMargin,
     });
     if (!crop) return;
 
-    state.busy = true;
+    channel.busy = true;
+    channel.lastRunMs = now;
     const t0 = performance.now();
 
     try {
@@ -150,45 +172,65 @@ export function createGestureClassifier(config) {
       }
 
       const label = config.classNames[bestIdx] ?? `class_${bestIdx}`;
-      state.latest.side = picked.side;
-      state.latest.latencyMs = performance.now() - t0;
-      state.raw.label = label;
-      state.raw.confidence = bestProb;
-      updateStable(label, bestProb);
+      channel.latest.latencyMs = performance.now() - t0;
+      channel.raw.label = label;
+      channel.raw.confidence = bestProb;
+      updateStable(channel, label, bestProb);
     } catch (error) {
-      console.warn("[gesture] inference failed:", error);
+      console.warn(`[gesture] ${side} inference failed:`, error);
     } finally {
-      state.busy = false;
-      state.lastRunMs = performance.now();
+      channel.busy = false;
     }
   }
 
   function schedule(video, trackingResult) {
-    if (!state.ready) return;
+    if (!state.ready || !video) return;
 
-    const now = performance.now();
-    if (now - state.lastRunMs < config.inferenceIntervalMs) return;
-    if (state.pending || state.busy) return;
+    for (const side of ["left", "right"]) {
+      const channel = state[side];
+      if (channel.busy) continue;
+      queueMicrotask(() => {
+        void runInferenceForSide(video, trackingResult, side);
+      });
+    }
+  }
 
-    state.pending = true;
-    queueMicrotask(() => {
-      state.pending = false;
-      void runInference(video, trackingResult);
-    });
+  function sideSnapshot(side) {
+    const channel = state[side];
+    return {
+      side,
+      label: channel.latest.label,
+      confidence: channel.latest.confidence,
+      stableLabel: channel.latest.label,
+      stableConfidence: channel.latest.confidence,
+      rawLabel: channel.raw.label,
+      rawConfidence: channel.raw.confidence,
+      latencyMs: channel.latest.latencyMs,
+    };
   }
 
   function getSnapshot() {
     return {
       enabled: state.ready,
       disabledReason: state.disabledReason,
-      label: state.latest.label,
-      confidence: state.latest.confidence,
-      stableLabel: state.latest.label,
-      stableConfidence: state.latest.confidence,
-      rawLabel: state.raw.label,
-      rawConfidence: state.raw.confidence,
-      side: state.latest.side,
-      latencyMs: state.latest.latencyMs,
+      left: sideSnapshot("left"),
+      right: sideSnapshot("right"),
+      /** @deprecated use left/right */
+      label: sideSnapshot("right").label ?? sideSnapshot("left").label,
+      confidence:
+        sideSnapshot("right").confidence ?? sideSnapshot("left").confidence,
+      side: sideSnapshot("right").label
+        ? "right"
+        : sideSnapshot("left").label
+          ? "left"
+          : null,
+      rawLabel:
+        sideSnapshot("right").rawLabel ?? sideSnapshot("left").rawLabel,
+      rawConfidence:
+        sideSnapshot("right").rawConfidence ??
+        sideSnapshot("left").rawConfidence,
+      latencyMs:
+        sideSnapshot("right").latencyMs ?? sideSnapshot("left").latencyMs,
     };
   }
 

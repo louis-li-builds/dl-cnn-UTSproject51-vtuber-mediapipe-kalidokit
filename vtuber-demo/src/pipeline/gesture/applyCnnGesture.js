@@ -1,49 +1,48 @@
 ﻿/**
- * Attach stable CNN label to the tracked hand and set gesture_cnn_active for VRM pose override.
+ * Apply per-hand CNN labels to motionState for VRM finger pose override.
  */
-export function applyCnnGestureToMotionState(motionState, snap, config) {
-  if (!motionState?.hands || !snap) return;
 
+function buildActiveLabel(snap, config) {
   const override = config?.poseOverride ?? { enabled: true };
-  const minConf = override.minConfidence ?? config?.minConfidence ?? 0.5;
-  const label =
-    override.useStableLabel !== false
-      ? snap.stableLabel ?? snap.label
-      : snap.rawLabel ?? snap.label;
+  const minConf = override.minConfidence ?? config?.minConfidence ?? 0.4;
+  const useStable = override.useStableLabel !== false;
+  const label = useStable
+    ? snap.stableLabel ?? snap.label
+    : snap.rawLabel ?? snap.label;
   const confidence = snap.stableConfidence ?? snap.confidence ?? 0;
-
   const allowed = override.gestures;
-  let active = null;
 
   if (
-    override.enabled !== false &&
-    label &&
-    confidence >= minConf &&
-    (!Array.isArray(allowed) || allowed.length === 0 || allowed.includes(label))
+    override.enabled === false ||
+    !label ||
+    confidence < minConf ||
+    (Array.isArray(allowed) &&
+      allowed.length > 0 &&
+      !allowed.includes(label))
   ) {
-    active = label;
+    return { label, confidence, active: null };
   }
 
-  const patch = {
+  return { label, confidence, active: label };
+}
+
+function applyToHand(handState, snap, config) {
+  if (!handState?.detected || !snap) return;
+
+  const { label, confidence, active } = buildActiveLabel(snap, config);
+
+  Object.assign(handState, {
     gesture_cnn: label,
     gesture_cnn_raw: snap.rawLabel,
     gesture_cnn_confidence: confidence,
     gesture_cnn_active: active,
     gesture_cnn_pose_locked: Boolean(active),
-  };
+  });
+}
 
-  const side = snap.side;
-  if (side === "left" && motionState.hands.left?.detected) {
-    Object.assign(motionState.hands.left, patch);
-    if (motionState.hands.right) {
-      motionState.hands.right.gesture_cnn_active = null;
-      motionState.hands.right.gesture_cnn_pose_locked = false;
-    }
-  } else if (side === "right" && motionState.hands.right?.detected) {
-    Object.assign(motionState.hands.right, patch);
-    if (motionState.hands.left) {
-      motionState.hands.left.gesture_cnn_active = null;
-      motionState.hands.left.gesture_cnn_pose_locked = false;
-    }
-  }
+export function applyCnnGestureToMotionState(motionState, snap, config) {
+  if (!motionState?.hands || !snap?.enabled) return;
+
+  applyToHand(motionState.hands.left, snap.left, config);
+  applyToHand(motionState.hands.right, snap.right, config);
 }

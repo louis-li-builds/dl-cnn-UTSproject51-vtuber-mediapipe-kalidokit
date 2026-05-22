@@ -3,7 +3,7 @@
     "detectMaxWidth": 640
   },
   "tracking": {
-    "swapHandSides": false
+    "swapHandSides": true
   },
   "webcam": {
     "videoProfile": "compact",
@@ -11,7 +11,7 @@
     "digitalZoom": 1
   },
   "gesture": {
-    "enabled": false
+    "enabled": true
   },
   "forward": {
     "enabled": false,
@@ -19,6 +19,8 @@
     "intervalMs": 33
   },
   "smoothing": {
-    "alpha": 0.35
+    "alpha": 0.35,
+    "wristRotSmoothAlpha": 0.19,
+    "fingerCurlSmoothAlpha": 0.52
   }
 }

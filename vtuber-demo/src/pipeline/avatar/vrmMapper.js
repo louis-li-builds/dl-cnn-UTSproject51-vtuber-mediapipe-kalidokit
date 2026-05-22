@@ -1,3 +1,11 @@
+import {
+  makeFixedGestureFingerPose,
+  makeThumbOpenPose,
+  makeThumbCurlPose,
+  makeFingerOpenPose,
+  makeFingerCurlPose,
+} from "./gestureFingerPoses.js";
+
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
@@ -52,10 +60,23 @@ function getUpperArmRotation(motionState, side) {
   const body = motionState.upper_body ?? {};
 
   if (side === "left" && body.left_upper_arm) {
-    return safeRot(body.left_upper_arm);
+    const rot = safeRot(body.left_upper_arm);
+
+    return {
+      x: clamp(rot.x * 0.75, -1.2, 1.2),
+      y: clamp(rot.y * 0.75, -1.2, 1.2),
+      z: clamp(rot.z * 0.75, -1.5, 1.5),
+    };
   }
+
   if (side === "right" && body.right_upper_arm) {
-    return safeRot(body.right_upper_arm);
+    const rot = safeRot(body.right_upper_arm);
+
+    return {
+      x: clamp(rot.x * 0.75, -1.2, 1.2),
+      y: clamp(rot.y * 0.75, -1.2, 1.2),
+      z: clamp(rot.z * 0.75, -1.5, 1.5),
+    };
   }
 
   const lift =
@@ -68,23 +89,76 @@ function getUpperArmRotation(motionState, side) {
   };
 }
 
+const ENABLE_LOWER_ARM_TRACKING = true;
+
+const LOWER_ARM_UPDOWN_SCALE = 0.6;
+const LOWER_ARM_SIDE_Y_SCALE = 2.0;
+const LOWER_ARM_SIDE_Z_SCALE = 1.3;
+const LOWER_ARM_LEFT_LIFT_OFFSET = 0.6;
+const LOWER_ARM_RIGHT_LIFT_OFFSET = 0.6;
+const LOWER_ARM_ELBOW_BEND_SCALE = 0.45;
+
+const LOWER_ARM_FLIP_Y = false;
+const LOWER_ARM_FLIP_Z = false;
+const LOWER_ARM_FLIP_X_OFFSET = false;
+
 function getLowerArmRotation(motionState, side) {
   const body = motionState.upper_body ?? {};
 
-  if (side === "left" && body.left_lower_arm) {
-    return safeRot(body.left_lower_arm);
+  const liftOffsetRaw =
+    side === "left"
+      ? LOWER_ARM_LEFT_LIFT_OFFSET
+      : LOWER_ARM_RIGHT_LIFT_OFFSET;
+
+  const liftOffset = LOWER_ARM_FLIP_X_OFFSET
+    ? -liftOffsetRaw
+    : liftOffsetRaw;
+
+  if (!ENABLE_LOWER_ARM_TRACKING) {
+    return {
+      x: liftOffset,
+      y: 0,
+      z: 0,
+    };
   }
-  if (side === "right" && body.right_lower_arm) {
-    return safeRot(body.right_lower_arm);
+
+  const lowerArmRot =
+    side === "left" ? body.left_lower_arm : body.right_lower_arm;
+
+  if (lowerArmRot) {
+    const rot = safeRot(lowerArmRot);
+
+    let y = rot.y * LOWER_ARM_SIDE_Y_SCALE;
+    let z = rot.z * LOWER_ARM_SIDE_Z_SCALE;
+
+    if (LOWER_ARM_FLIP_Y) {
+      y = -y;
+    }
+
+    if (LOWER_ARM_FLIP_Z) {
+      z = -z;
+    }
+
+    return {
+      x: clamp(rot.x * LOWER_ARM_UPDOWN_SCALE + liftOffset, -1.4, 1.4),
+      y: clamp(y, -1.4, 1.4),
+      z: clamp(z, -1.4, 1.4),
+    };
   }
 
   const elbow =
     side === "left" ? body.left_elbow_angle : body.right_elbow_angle;
 
+  let z = remapElbowLegacy(elbow, side) * LOWER_ARM_ELBOW_BEND_SCALE;
+
+  if (LOWER_ARM_FLIP_Z) {
+    z = -z;
+  }
+
   return {
-    x: 0,
+    x: liftOffset,
     y: 0,
-    z: remapElbowLegacy(elbow, side),
+    z: clamp(z, -1.4, 1.4),
   };
 }
 
@@ -95,99 +169,98 @@ function calibrateWrist(rot, side) {
 
   if (side === "left") {
     return {
-      x: clamp(-x * 0.85, -1.0, 1.0),
-      y: clamp(y * 0.65, -0.8, 0.8),
-      z: clamp(-z * 0.9, -1.2, 1.2),
+      x: clamp(-x * 0.45, -0.7, 0.7),
+      y: clamp(y * 0.35, -0.5, 0.5),
+      z: clamp(-z * 0.55, -0.8, 0.8),
     };
   }
 
   return {
-    x: clamp(x * 0.85, -1.0, 1.0),
-    y: clamp(-y * 0.65, -0.8, 0.8),
-    z: clamp(z * 0.9, -1.2, 1.2),
+    x: clamp(x * 0.45, -0.7, 0.7),
+    y: clamp(-y * 0.35, -0.5, 0.5),
+    z: clamp(z * 0.55, -0.8, 0.8),
   };
 }
 
-/**
- * Wrist on the avatar:
- * - `wrist_angle` (2D, from landmarks) is usually the most stable “in-plane” roll.
- * - `wrist_rot` (3D heuristic) adds tilt but picks up noise → blend, do not let it fully own the joint.
- */
 function getHandRotation(motionState, side) {
-  const hand = side === "left" ? motionState.hands?.left : motionState.hands?.right;
+  const hand =
+    side === "left" ? motionState.hands?.left : motionState.hands?.right;
 
-  const wristAngle = hand?.wrist_angle;
-  const baseZ = Number.isFinite(wristAngle) ? degToRad(wristAngle) : 0;
-
-  const hasFullWristRot =
-    Number.isFinite(hand?.wrist_rot?.x) &&
-    Number.isFinite(hand?.wrist_rot?.y) &&
+  const hasWristRot =
+    Number.isFinite(hand?.wrist_rot?.x) ||
+    Number.isFinite(hand?.wrist_rot?.y) ||
     Number.isFinite(hand?.wrist_rot?.z);
 
-  if (!hasFullWristRot && !Number.isFinite(wristAngle)) {
-    return { x: 0, y: 0, z: 0 };
+  if (hasWristRot) {
+    return calibrateWrist(hand.wrist_rot, side);
   }
 
-  if (hasFullWristRot) {
-    const wr = calibrateWrist(hand.wrist_rot, side);
-    if (Number.isFinite(wristAngle)) {
-      return {
-        x: wr.x * 0.32,
-        y: wr.y * 0.32,
-        z: clamp(baseZ * 0.72 + wr.z * 0.28, -1.35, 1.35),
-      };
-    }
-    return wr;
+  const wristAngle = hand?.wrist_angle;
+
+  if (!Number.isFinite(wristAngle)) {
+    return {
+      x: 0,
+      y: 0,
+      z: 0,
+    };
   }
-
-  return { x: 0, y: 0, z: baseZ };
-}
-
-/** Tuning: raise multipliers if fingers still look “dead”; lower if they over-bend or clip. */
-const FINGER_GAIN = 1.38;
-
-function makeThumbCurl(curl, side) {
-  const c = clamp(safe(curl, 0), 0, 1) * FINGER_GAIN;
-  const spread = side === "left" ? 1 : -1;
 
   return {
-    metacarpal: {
-      x: 0,
-      y: clamp(spread * 0.22 * c, -0.55, 0.55),
-      z: clamp(-0.18 * c, -0.85, 0.85),
-    },
-    proximal: {
-      x: 0,
-      y: 0,
-      z: clamp(-0.42 * c, -1.15, 1.15),
-    },
-    distal: {
-      x: 0,
-      y: 0,
-      z: clamp(-0.30 * c, -0.95, 0.95),
-    },
+    x: 0,
+    y: 0,
+    z: degToRad(wristAngle) * 0.5,
   };
 }
 
-function makeFingerCurl(curl) {
-  const c = clamp(safe(curl, 0), 0, 1) * FINGER_GAIN;
+function makeFingerHalfCurlPose(side) {
+  return makeFingerCurlPose(side, 0.55);
+}
+
+/** Exp02 / HAGRID CNN — from applyCnnGestureToMotionState */
+function getCnnGesture(handState) {
+  if (handState?.gesture_cnn_pose_locked && handState?.gesture_cnn_active) {
+    return handState.gesture_cnn_active;
+  }
+  return null;
+}
+
+function makeThumbCurl(curl, side) {
+  const c = clamp(safe(curl, 0), 0, 1);
+
+  if (c <= 0.05) {
+    return makeThumbOpenPose(side);
+  }
+
+  return makeThumbCurlPose(side, c);
+}
+
+function makeFingerCurl(curl, side) {
+  const c = clamp(safe(curl, 0), 0, 1);
+
+  if (c <= 0.05) {
+    return makeFingerOpenPose();
+  }
+
+  if (c < 0.65) {
+    return makeFingerHalfCurlPose(side);
+  }
+
+  return makeFingerCurlPose(side, c);
+}
+
+function makeHandFingerPose(motionState, handState, side) {
+  const cnnGesture = getCnnGesture(handState);
+  if (cnnGesture) {
+    const cnnPose = makeFixedGestureFingerPose(cnnGesture, side);
+    if (cnnPose) return cnnPose;
+  }
 
   return {
-    proximal: {
-      x: 0,
-      y: 0,
-      z: clamp(-0.55 * c, -1.35, 1.35),
-    },
-    intermediate: {
-      x: 0,
-      y: 0,
-      z: clamp(-0.90 * c, -1.85, 1.85),
-    },
-    distal: {
-      x: 0,
-      y: 0,
-      z: clamp(-0.55 * c, -1.35, 1.35),
-    },
+    thumb: makeThumbCurl(handState?.finger_curl?.thumb, side),
+    index: makeFingerCurl(handState?.finger_curl?.index, side),
+    middle: makeFingerCurl(handState?.finger_curl?.middle, side),
+    ring: makeFingerCurl(handState?.finger_curl?.ring, side),
+    little: makeFingerCurl(handState?.finger_curl?.pinky, side),
   };
 }
 
@@ -220,6 +293,7 @@ export function mapMotionStateToAvatarState(motionState) {
 
       leftUpperArm: getUpperArmRotation(motionState, "left"),
       rightUpperArm: getUpperArmRotation(motionState, "right"),
+
       leftLowerArm: getLowerArmRotation(motionState, "left"),
       rightLowerArm: getLowerArmRotation(motionState, "right"),
 
@@ -228,20 +302,8 @@ export function mapMotionStateToAvatarState(motionState) {
     },
 
     fingers: {
-      left: {
-        thumb: makeThumbCurl(leftHand?.finger_curl?.thumb, "left"),
-        index: makeFingerCurl(leftHand?.finger_curl?.index),
-        middle: makeFingerCurl(leftHand?.finger_curl?.middle),
-        ring: makeFingerCurl(leftHand?.finger_curl?.ring),
-        little: makeFingerCurl(leftHand?.finger_curl?.pinky),
-      },
-      right: {
-        thumb: makeThumbCurl(rightHand?.finger_curl?.thumb, "right"),
-        index: makeFingerCurl(rightHand?.finger_curl?.index),
-        middle: makeFingerCurl(rightHand?.finger_curl?.middle),
-        ring: makeFingerCurl(rightHand?.finger_curl?.ring),
-        little: makeFingerCurl(rightHand?.finger_curl?.pinky),
-      },
+      left: makeHandFingerPose(motionState, leftHand, "left"),
+      right: makeHandFingerPose(motionState, rightHand, "right"),
     },
   };
 }
