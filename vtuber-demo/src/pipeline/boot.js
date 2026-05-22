@@ -19,30 +19,27 @@ const DEFAULT_DEMO_CONFIG = {
   },
   tracking: {
     /**
-     * When true, MediaPipe "left" hand data is written to `trackingResult.hands.right`
-     * (and vice versa). Use only if your **physical** left clearly drives the **wrong**
-     * avatar arm after `mirrorInference`; default false keeps left→left, right→right.
+     * `exp02` — teammate handedness slot (best L/R on mirrored webcam).
+     * `legacy` — wrist-distance + 5-frame singleton stabilizer (older main).
      */
-    swapHandSides: false,
-    /**
-     * When true (default), Holistic runs on a horizontally flipped frame so
-     * labels match the CSS-mirrored webcam preview.
-     */
-    mirrorInference: true,
-    /**
-     * When true (default) together with `mirrorInference`, flip HandLandmarker
-     * Left/Right labels before slotting **singleton** hands (fixes common webcam mirror
-     * inversion). Set **false** if single-hand L/R is still wrong the other way.
-     */
-    invertMirroredHandedness: true,
+    handSlotMode: "exp02",
+    /** Exp02 default on (`!== false` in trackingResult). Legacy uses explicit boolean. */
+    swapHandSides: true,
+    /** Legacy-only: flip inference buffer. Exp02 uses raw video + overlay CSS mirror. */
+    mirrorInference: false,
+    invertMirroredHandedness: false,
+  },
+  gesture: {
+    enabled: true,
   },
   webcam: {
-    videoProfile: "standard",
+    videoProfile: "compact",
     objectFit: "contain",
     digitalZoom: 1,
   },
   smoothing: {
     mode: "oneEuro",
+    holdInactiveHandMs: 0,
     alpha: 0.3,
     oneEuro: {
       minCutoff: 0.8,
@@ -99,9 +96,11 @@ function formatMotionPanelText(trackingResult, motionState, extras) {
   const snap = extras?.gestureSnap;
 
   return `timestamp: ${Math.round(trackingResult.timestamp)}
-demo: holistic.maxW=${cfg.holistic?.detectMaxWidth ?? 0} swapSides=${Boolean(
-    cfg.tracking?.swapHandSides
-  )} invertH=${cfg.tracking?.invertMirroredHandedness !== false} (after wrist-match) mirrorInference=${
+demo: slot=${cfg.tracking?.handSlotMode ?? "exp02"} maxW=${cfg.holistic?.detectMaxWidth ?? 0} swapSides=${
+    cfg.tracking?.handSlotMode === "legacy"
+      ? Boolean(cfg.tracking?.swapHandSides)
+      : cfg.tracking?.swapHandSides !== false
+  } invertH=${cfg.tracking?.invertMirroredHandedness !== false} mirror=${
     cfg.tracking?.mirrorInference !== false
   } smoothing=${
     cfg.smoothing?.mode ?? "?"
@@ -340,7 +339,8 @@ export async function bootVtuberPipeline({
     logSystem(
       "boot",
       `holistic maxW=${demoCfg.holistic?.detectMaxWidth ?? 0} | ` +
-        `swapSides=${Boolean(demoCfg.tracking?.swapHandSides)} | ` +
+        `slot=${demoCfg.tracking?.handSlotMode ?? "exp02"} | ` +
+        `swapSides=${demoCfg.tracking?.swapHandSides !== false} | ` +
         `mirror=${demoCfg.tracking?.mirrorInference !== false} | ` +
         `invertH=${demoCfg.tracking?.invertMirroredHandedness !== false}`
     );
@@ -408,12 +408,22 @@ export async function bootVtuberPipeline({
       onFrame: renderTrackingResult,
       detectMaxWidth: demoCfg.holistic?.detectMaxWidth ?? 0,
       trackingOptions: {},
-      getTrackingOptions: () => ({
-        swapHandSides: Boolean(appState.demoConfig.tracking?.swapHandSides),
-        mirrorInference: appState.demoConfig.tracking?.mirrorInference !== false,
-        invertMirroredHandedness:
-          appState.demoConfig.tracking?.invertMirroredHandedness !== false,
-      }),
+      getTrackingOptions: () => {
+        const t = appState.demoConfig.tracking ?? {};
+        const exp02 = (t.handSlotMode ?? "exp02") !== "legacy";
+        if (exp02) {
+          return {
+            handSlotMode: "exp02",
+            swapHandSides: t.swapHandSides !== false,
+          };
+        }
+        return {
+          handSlotMode: "legacy",
+          swapHandSides: Boolean(t.swapHandSides),
+          mirrorInference: t.mirrorInference !== false,
+          invertMirroredHandedness: t.invertMirroredHandedness !== false,
+        };
+      },
     });
     appState.trackingHandle = trackingHandle;
 

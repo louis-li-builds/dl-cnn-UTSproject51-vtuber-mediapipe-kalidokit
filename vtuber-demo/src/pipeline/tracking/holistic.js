@@ -1,4 +1,4 @@
-import { buildTrackingResult } from "./trackingResult.js";
+﻿import { buildTrackingResult } from "./trackingResult.js";
 import { createDedicatedHandTracker } from "./handLandmarker.js";
 import { resetHandLandmarkHold } from "./handLandmarkHold.js";
 import { resetHandSlotStabilizer } from "./handSlotStabilizer.js";
@@ -26,8 +26,11 @@ function createOverlayCanvas(stage) {
   return canvas;
 }
 
-function setOverlayMirrorStyle(canvas, mirrorInference) {
-  canvas.style.transform = mirrorInference ? "" : "scaleX(-1)";
+/** Exp02 skeleton: overlay CSS flip only; legacy main may flip the inference buffer instead. */
+function setOverlayMirrorStyle(canvas, { mirrorInference, handSlotMode }) {
+  const exp02Slots = (handSlotMode ?? "exp02") !== "legacy";
+  const cssMirror = exp02Slots || !mirrorInference;
+  canvas.style.transform = cssMirror ? "scaleX(-1)" : "";
 }
 
 function resizeCanvasToVideo(canvas, video, stage) {
@@ -168,14 +171,20 @@ export async function initHolisticTracking({
 
       const nowMs = performance.now();
       const opts = mergeTrackingOpts(trackingOptions, getTrackingOptions);
-      const mirrorInference = opts.mirrorInference !== false;
+      const handSlotMode = opts.handSlotMode ?? "exp02";
+      const exp02Slots = handSlotMode !== "legacy";
+      /** Exp02: raw camera buffer + CSS overlay flip (matches teammate skeleton). */
+      const mirrorInference = exp02Slots
+        ? false
+        : opts.mirrorInference !== false;
       const buildOpts = {
-        swapHandSides: Boolean(opts.swapHandSides),
+        handSlotMode,
+        swapHandSides: opts.swapHandSides,
         mirrorInference,
         invertMirroredHandedness: opts.invertMirroredHandedness !== false,
       };
 
-      setOverlayMirrorStyle(canvas, mirrorInference);
+      setOverlayMirrorStyle(canvas, { mirrorInference, handSlotMode });
 
       let detectSource = video;
 

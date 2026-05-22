@@ -1,19 +1,17 @@
 /**
- * Holistic-only callers can still pass the raw `detectForVideo` object as the first argument.
- * When `handResult` is present, dedicated HandLandmarker landmarks override Holistic per slot.
+ * Holistic + dedicated HandLandmarker fusion.
  *
- * **Left/right:** Dual Holistic hands → wrist-distance match. Single Holistic channel (singleton)
- * → mirrored handedness + **slot stabilizer** (reduces flicker). `swapHandSides` swaps final slots.
+ * **handSlotMode `exp02` (default):** handedness → slot with optional `swapHandSides`
+ * (teammate skeleton; best L/R accuracy on mirrored webcam).
+ *
+ * **handSlotMode `legacy`:** wrist-distance + singleton stabilizer + invert (older main).
+ *
+ * Both modes keep main smoothness: solo latch, ghost-hand suppression, landmark hold.
  */
 
-import {
-  applyHandLandmarkHold,
-  emptyPick,
-  resetHandLandmarkHold,
-} from "./handLandmarkHold.js";
+import { applyHandLandmarkHold, emptyPick } from "./handLandmarkHold.js";
 import {
   notifySoloDedicatedSide,
-  resetSoloHandLatch,
   shouldSuppressHolisticFallback,
 } from "./soloHandLatch.js";
 import {
@@ -74,9 +72,71 @@ function sideFromHandednessLabel(handednessLabel) {
   return handednessLabel;
 }
 
+/** Exp02 skeleton: swap at assignment when `swapHandSides !== false` (default on). */
+function maybeSwap(side, options = {}) {
+  const swap =
+    options.handSlotMode === "legacy"
+      ? Boolean(options.swapHandSides)
+      : options.swapHandSides !== false;
+  return swap ? oppositeSide(side) : side;
+}
+
+function sideFromHandednessExp02(handednessLabel, options) {
+  if (handednessLabel !== "left" && handednessLabel !== "right") {
+    return null;
+  }
+  return maybeSwap(handednessLabel, options);
+}
+
+function sideFromScreenPositionExp02(landmarks, options) {
+  const rawX = averageX(landmarks);
+  return maybeSwap(rawX < 0.5 ? "right" : "left", options);
+}
+
 /**
- * @param {boolean} [applyInvert] When false, do not flip labels (used for 2-hand handedness-only pairing).
+ * Teammate exp02: HandLandmarker handedness → left/right slot (highest score per side).
  */
+function extractDedicatedHandsExp02(handResult, options) {
+  const output = { left: null, right: null };
+
+  if (!handResult || !Array.isArray(handResult.landmarks)) {
+    return output;
+  }
+
+  for (let i = 0; i < handResult.landmarks.length; i += 1) {
+    const landmarks = handResult.landmarks?.[i] ?? [];
+    if (!landmarks.length) continue;
+
+    const worldLandmarks = handResult.worldLandmarks?.[i] ?? [];
+    const handedness = handResult.handedness?.[i]?.[0] ?? null;
+    const handednessLabel = handedness?.categoryName?.toLowerCase?.() ?? null;
+    const handednessScore = Number.isFinite(handedness?.score) ? handedness.score : 0;
+
+    const side = USE_MEDIAPIPE_HANDEDNESS
+      ? sideFromHandednessExp02(handednessLabel, options)
+      : sideFromScreenPositionExp02(landmarks, options);
+
+    if (side !== "left" && side !== "right") continue;
+
+    const candidate = {
+      landmarks,
+      worldLandmarks,
+      handednessScore,
+      handednessLabel,
+      source: USE_MEDIAPIPE_HANDEDNESS
+        ? `handLandmarker:exp02:${handednessLabel ?? "?"}→${side}`
+        : `handLandmarker:exp02:xpos→${side}`,
+    };
+
+    const current = output[side];
+    if (!current || handednessScore >= (current.handednessScore ?? 0)) {
+      output[side] = candidate;
+    }
+  }
+
+  return output;
+}
+
 function slotFromMirroredHandedness(handednessLabel, options, applyInvert = true) {
   const base = sideFromHandednessLabel(handednessLabel);
   if (base === null) return null;
@@ -125,9 +185,6 @@ function extractHandList(handResult) {
   return list;
 }
 
-/**
- * Handedness-only assignment (no Holistic anchors). `swapHandSides` applied later by caller.
- */
 function assignDedicatedByHandednessOnly(hands, options) {
   if (hands.length === 1) {
     const h = hands[0];
@@ -261,18 +318,37 @@ function mergeDedicatedSlots(dedicated, swapHandSides) {
   return { left, right };
 }
 
+function resolveHandSlotMode(options) {
+  const mode = options?.handSlotMode;
+  return mode === "legacy" ? "legacy" : "exp02";
+}
+
+function assignDedicatedSlots(handList, handResult, holisticResult, options) {
+  if (handList.length === 0) {
+    return { left: null, right: null };
+  }
+
+  const mode = resolveHandSlotMode(options);
+
+  if (mode === "exp02") {
+    return extractDedicatedHandsExp02(handResult, options);
+  }
+
+  const raw = assignDedicatedWithHolisticAnchors(handList, holisticResult, options);
+  return mergeDedicatedSlots(raw, Boolean(options.swapHandSides));
+}
+
 /**
  * @param {object} input Holistic raw result, or `{ holisticResult, handResult }`.
  * @param {number} [timestamp]
  * @param {{
+ *   handSlotMode?: "exp02"|"legacy";
  *   swapHandSides?: boolean;
  *   mirrorInference?: boolean;
  *   invertMirroredHandedness?: boolean;
  * }} [options]
  */
 export function buildTrackingResult(input, timestamp = performance.now(), options = {}) {
-  const swapHandSides = Boolean(options.swapHandSides);
-
   const hasFusionShape =
     input &&
     (Object.prototype.hasOwnProperty.call(input, "holisticResult") ||
@@ -287,19 +363,12 @@ export function buildTrackingResult(input, timestamp = performance.now(), option
 
   const handList = extractHandList(handResult);
 
-  const hLeftLm = holisticResult.leftHandLandmarks?.[0];
-  const hRightLm = holisticResult.rightHandLandmarks?.[0];
-  const hasL = hLeftLm?.length > 0;
-  const hasR = hRightLm?.length > 0;
-
   notifyHandTrackingTopology(handList.length);
 
-  const rawDedicated =
-    handList.length === 0
-      ? { left: null, right: null }
-      : assignDedicatedWithHolisticAnchors(handList, holisticResult, options);
+  const handSlotMode = resolveHandSlotMode(options);
+  const exp02Slots = handSlotMode === "exp02";
 
-  const dedicated = mergeDedicatedSlots(rawDedicated, swapHandSides);
+  const dedicated = assignDedicatedSlots(handList, handResult, holisticResult, options);
 
   const fallbackLeft = {
     landmarks: holisticResult.leftHandLandmarks?.[0] ?? [],
@@ -319,36 +388,50 @@ export function buildTrackingResult(input, timestamp = performance.now(), option
 
   const nowMs = timestamp;
 
-  if (dedicated.left && dedicated.right) {
-    notifySoloDedicatedSide(null, nowMs);
-  } else if (dedicated.left) {
-    notifySoloDedicatedSide("left", nowMs);
-  } else if (dedicated.right) {
-    notifySoloDedicatedSide("right", nowMs);
-  } else {
-    notifySoloDedicatedSide(null, nowMs);
-  }
-
   let pickLeft = dedicated.left ?? fallbackLeft;
   let pickRight = dedicated.right ?? fallbackRight;
 
-  if (!dedicated.left && shouldSuppressHolisticFallback("left", nowMs)) {
-    pickLeft = emptyPick();
-  }
-  if (!dedicated.right && shouldSuppressHolisticFallback("right", nowMs)) {
-    pickRight = emptyPick();
-  }
-
-  /** One dedicated slot filled: suppress Holistic ghost hand on the empty side (major flicker source). */
-  const onlyLeftDedicated = Boolean(dedicated.left) && !dedicated.right;
-  const onlyRightDedicated = Boolean(dedicated.right) && !dedicated.left;
-  if (onlyLeftDedicated) {
-    pickRight = emptyPick();
-  } else if (onlyRightDedicated) {
-    pickLeft = emptyPick();
+  /** Exp02: one dedicated hand — do not let Holistic fill the empty slot (opposite arm). */
+  if (exp02Slots) {
+    const onlyLeftDedicated = Boolean(dedicated.left) && !dedicated.right;
+    const onlyRightDedicated = Boolean(dedicated.right) && !dedicated.left;
+    if (onlyLeftDedicated) {
+      pickRight = emptyPick();
+    } else if (onlyRightDedicated) {
+      pickLeft = emptyPick();
+    }
   }
 
-  const held = applyHandLandmarkHold(pickLeft, pickRight, timestamp);
+  if (!exp02Slots) {
+    if (dedicated.left && dedicated.right) {
+      notifySoloDedicatedSide(null, nowMs);
+    } else if (dedicated.left) {
+      notifySoloDedicatedSide("left", nowMs);
+    } else if (dedicated.right) {
+      notifySoloDedicatedSide("right", nowMs);
+    } else {
+      notifySoloDedicatedSide(null, nowMs);
+    }
+
+    if (!dedicated.left && shouldSuppressHolisticFallback("left", nowMs)) {
+      pickLeft = emptyPick();
+    }
+    if (!dedicated.right && shouldSuppressHolisticFallback("right", nowMs)) {
+      pickRight = emptyPick();
+    }
+
+    const onlyLeftDedicated = Boolean(dedicated.left) && !dedicated.right;
+    const onlyRightDedicated = Boolean(dedicated.right) && !dedicated.left;
+    if (onlyLeftDedicated) {
+      pickRight = emptyPick();
+    } else if (onlyRightDedicated) {
+      pickLeft = emptyPick();
+    }
+  }
+
+  const held = applyHandLandmarkHold(pickLeft, pickRight, timestamp, {
+    handSlotMode,
+  });
   pickLeft = held.left;
   pickRight = held.right;
 
@@ -375,6 +458,3 @@ export function buildTrackingResult(input, timestamp = performance.now(), option
     },
   };
 }
-
-/** @deprecated Use `options.swapHandSides` in `buildTrackingResult`; kept for grep/docs. */
-export const TRACKING_SWAP_HAND_SIDES = false;

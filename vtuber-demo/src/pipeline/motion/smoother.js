@@ -44,13 +44,15 @@ function smoothRotLerp(prevRot, nextRot, alpha) {
   };
 }
 
-const HAND_DETECT_HOLD_MS_LERP = 220;
-
-function smoothHandLerp(prevHand, nextHand, alpha, nowMs = performance.now()) {
+function smoothHandLerp(prevHand, nextHand, alpha, nowMs, holdInactiveHandMs) {
   const lastSeenMs = prevHand?._lastSeenMs ?? 0;
 
   if (!nextHand || !nextHand.detected) {
-    if (prevHand?.detected && nowMs - lastSeenMs < HAND_DETECT_HOLD_MS_LERP) {
+    if (
+      holdInactiveHandMs > 0 &&
+      prevHand?.detected &&
+      nowMs - lastSeenMs < holdInactiveHandMs
+    ) {
       return { ...prevHand, detected: true, _lastSeenMs: lastSeenMs };
     }
     return {
@@ -93,10 +95,17 @@ function smoothHandLerp(prevHand, nextHand, alpha, nowMs = performance.now()) {
  * @param {"lerp"|"oneEuro"} [config.mode] default oneEuro
  * @param {number} [config.alpha] lerp blend (0–1), default 0.3
  * @param {object} [config.oneEuro] { minCutoff, beta, dCutoff }
+ * @param {number} [config.holdInactiveHandMs] keep last hand pose after lost detect (ms). Exp02 uses 0 so solo-hand does not drive the opposite avatar arm.
  */
 export function createMotionSmoother(config = {}) {
   const mode = config.mode ?? "oneEuro";
   const alpha = config.alpha ?? 0.3;
+  const holdInactiveHandMs =
+    typeof config.holdInactiveHandMs === "number"
+      ? config.holdInactiveHandMs
+      : mode === "oneEuro"
+        ? 220
+        : 220;
   const euroCfg = {
     minCutoff: config.oneEuro?.minCutoff ?? 1.0,
     beta: config.oneEuro?.beta ?? 0.007,
@@ -145,14 +154,16 @@ export function createMotionSmoother(config = {}) {
     };
   }
 
-  const HAND_DETECT_HOLD_MS = 220;
-
   function smoothHandEuro(prefix, prevHand, nextHand, tSec) {
     const nowMs = tSec * 1000;
     const lastSeenMs = prevHand?._lastSeenMs ?? 0;
 
     if (!nextHand || !nextHand.detected) {
-      if (prevHand?.detected && nowMs - lastSeenMs < HAND_DETECT_HOLD_MS) {
+      if (
+        holdInactiveHandMs > 0 &&
+        prevHand?.detected &&
+        nowMs - lastSeenMs < holdInactiveHandMs
+      ) {
         return { ...prevHand, detected: true, _lastSeenMs: lastSeenMs };
       }
       resetPrefix(`${prefix}.`);
@@ -261,13 +272,20 @@ export function createMotionSmoother(config = {}) {
       alpha
     );
 
-    const nowMs = (motionState?.timestamp ?? performance.now());
-    state.hands.left = smoothHandLerp(state.hands.left, motionState.hands.left, alpha, nowMs);
+    const nowMs = motionState?.timestamp ?? performance.now();
+    state.hands.left = smoothHandLerp(
+      state.hands.left,
+      motionState.hands.left,
+      alpha,
+      nowMs,
+      holdInactiveHandMs
+    );
     state.hands.right = smoothHandLerp(
       state.hands.right,
       motionState.hands.right,
       alpha,
-      nowMs
+      nowMs,
+      holdInactiveHandMs
     );
 
     return mergeMotion(motionState);
