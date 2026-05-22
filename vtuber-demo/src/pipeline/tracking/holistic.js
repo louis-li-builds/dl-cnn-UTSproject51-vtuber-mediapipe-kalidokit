@@ -1,5 +1,4 @@
-import { buildTrackingResult } from "./trackingResult.js";
-import { createDedicatedHandTracker } from "./handLandmarker.js";
+﻿import { buildTrackingResult } from "./trackingResult.js";
 
 const TASKS_VISION_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs";
@@ -7,7 +6,7 @@ const TASKS_VISION_URL =
 const WASM_ROOT =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/wasm";
 
-const HOLISTIC_MODEL_URL =
+const MODEL_URL =
   "https://storage.googleapis.com/mediapipe-models/holistic_landmarker/holistic_landmarker/float16/latest/holistic_landmarker.task";
 
 function createOverlayCanvas(stage) {
@@ -56,18 +55,28 @@ function drawPoints(ctx, landmarks, color, radius = 2) {
   }
 }
 
+/**
+ * @param {object} options
+ * @param {HTMLVideoElement} options.video
+ * @param {HTMLElement} options.stage
+ * @param {(s: string) => void} [options.onLog]
+ * @param {(trackingResult: object) => void} [options.onFrame]
+ * @param {number} [options.detectMaxWidth] if > 0, run Holistic on a downscaled canvas (same aspect as video) for speed/stability
+ * @param {() => object} [options.getTrackingOptions] e.g. { swapHandSides }
+ */
 export async function initHolisticTracking({
   video,
   stage,
   onLog,
   onFrame,
-  getTrackingOptions = () => ({}),
+  detectMaxWidth = 0,
+  getTrackingOptions,
 }) {
   if (!video) throw new Error("Video element is required.");
   if (!stage) throw new Error("Tracking stage is required.");
 
   const vision = await import(/* @vite-ignore */ TASKS_VISION_URL);
-  const { FilesetResolver, HolisticLandmarker, HandLandmarker } = vision;
+  const { FilesetResolver, HolisticLandmarker } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(WASM_ROOT);
 
@@ -75,7 +84,7 @@ export async function initHolisticTracking({
     filesetResolver,
     {
       baseOptions: {
-        modelAssetPath: HOLISTIC_MODEL_URL,
+        modelAssetPath: MODEL_URL,
       },
       runningMode: "VIDEO",
       numFaces: 1,
@@ -83,13 +92,15 @@ export async function initHolisticTracking({
     }
   );
 
-  const dedicatedHandTracker = await createDedicatedHandTracker({
-    filesetResolver,
-    HandLandmarker,
-  });
-
   const canvas = createOverlayCanvas(stage);
   const ctx = canvas.getContext("2d");
+
+  const useDownscale =
+    Number.isFinite(detectMaxWidth) && detectMaxWidth > 0;
+  const detectCanvas = useDownscale ? document.createElement("canvas") : null;
+  const detectCtx = useDownscale
+    ? detectCanvas.getContext("2d", { willReadFrequently: true })
+    : null;
 
   let lastVideoTime = -1;
   let rafId = null;
@@ -106,21 +117,32 @@ export async function initHolisticTracking({
       lastVideoTime = video.currentTime;
 
       const nowMs = performance.now();
+      let detectSource = video;
 
-      const holisticResult = holisticLandmarker.detectForVideo(video, nowMs);
-      const handResult = dedicatedHandTracker.detect(video, nowMs);
+      if (
+        useDownscale &&
+        detectCanvas &&
+        detectCtx &&
+        video.videoWidth > 0 &&
+        video.videoHeight > 0
+      ) {
+        const vw = video.videoWidth;
+        const vh = video.videoHeight;
+        const maxW = Math.min(Math.floor(detectMaxWidth), vw);
+        const tw = maxW;
+        const th = Math.max(1, Math.round((tw * vh) / vw));
+        if (detectCanvas.width !== tw || detectCanvas.height !== th) {
+          detectCanvas.width = tw;
+          detectCanvas.height = th;
+        }
+        detectCtx.drawImage(video, 0, 0, tw, th);
+        detectSource = detectCanvas;
+      }
 
+      const rawResult = holisticLandmarker.detectForVideo(detectSource, nowMs);
       const trackOpts =
         typeof getTrackingOptions === "function" ? getTrackingOptions() : {};
-
-      const trackingResult = buildTrackingResult(
-        {
-          holisticResult,
-          handResult,
-        },
-        nowMs,
-        trackOpts
-      );
+      const trackingResult = buildTrackingResult(rawResult, nowMs, trackOpts);
 
       const face = trackingResult.face.landmarks;
       const pose = trackingResult.pose.landmarks;
@@ -139,12 +161,17 @@ export async function initHolisticTracking({
       }
 
       if (onLog) {
+        const det =
+          detectSource === video
+            ? `${video.videoWidth}?${video.videoHeight}`
+            : `${detectCanvas.width}?${detectCanvas.height} (maxW=${detectMaxWidth})`;
         onLog(
-          "Holistic + HandLandmarker active.\n" +
+          "Holistic tracking active.\n" +
+            `Detection source: ${det}\n` +
             `Face landmarks: ${face.length}\n` +
             `Pose landmarks: ${pose.length}\n` +
-            `Left hand: ${leftHand.length} (source: ${trackingResult.hands.left.source})\n` +
-            `Right hand: ${rightHand.length} (source: ${trackingResult.hands.right.source})`
+            `Left hand landmarks: ${leftHand.length}\n` +
+            `Right hand landmarks: ${rightHand.length}`
         );
       }
     }
@@ -156,16 +183,9 @@ export async function initHolisticTracking({
 
   return {
     canvas,
-    holisticLandmarker,
-    dedicatedHandTracker,
+    landmarker: holisticLandmarker,
     stop() {
       if (rafId) cancelAnimationFrame(rafId);
-      if (typeof dedicatedHandTracker?.close === "function") {
-        dedicatedHandTracker.close();
-      }
-      if (typeof holisticLandmarker?.close === "function") {
-        holisticLandmarker.close();
-      }
     },
   };
 }

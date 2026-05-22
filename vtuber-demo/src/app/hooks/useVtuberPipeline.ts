@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { bootVtuberPipeline } from "../../pipeline/boot.js";
 
 export function useVtuberPipeline(
@@ -11,23 +11,24 @@ export function useVtuberPipeline(
   );
   const avatarIdRef = useRef(avatarId);
   avatarIdRef.current = avatarId;
+  const bootGenRef = useRef(0);
 
   useEffect(() => {
     if (!webcamMount || !avatarMount) return;
 
+    const gen = (bootGenRef.current += 1);
     let cancelled = false;
 
-    bootVtuberPipeline({
+    void bootVtuberPipeline({
       webcamMount,
       avatarMount,
       avatarId: avatarIdRef.current,
     }).then((api) => {
-      if (cancelled) {
+      if (cancelled || gen !== bootGenRef.current) {
         api.destroy();
         return;
       }
       pipelineRef.current = api;
-      void api.setAvatarId(avatarIdRef.current);
     });
 
     return () => {
@@ -38,6 +39,8 @@ export function useVtuberPipeline(
   }, [webcamMount, avatarMount]);
 
   useEffect(() => {
-    void pipelineRef.current?.setAvatarId(avatarId);
+    const api = pipelineRef.current;
+    if (!api) return;
+    void api.setAvatarId(avatarId);
   }, [avatarId]);
 }

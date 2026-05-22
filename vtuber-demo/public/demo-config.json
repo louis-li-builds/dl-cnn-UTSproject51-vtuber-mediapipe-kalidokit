@@ -1,0 +1,24 @@
+{
+  "holistic": {
+    "detectMaxWidth": 640
+  },
+  "tracking": {
+    "swapHandSides": false
+  },
+  "webcam": {
+    "videoProfile": "compact",
+    "objectFit": "contain",
+    "digitalZoom": 1
+  },
+  "gesture": {
+    "enabled": false
+  },
+  "forward": {
+    "enabled": false,
+    "url": "ws://127.0.0.1:8765",
+    "intervalMs": 33
+  },
+  "smoothing": {
+    "alpha": 0.35
+  }
+}

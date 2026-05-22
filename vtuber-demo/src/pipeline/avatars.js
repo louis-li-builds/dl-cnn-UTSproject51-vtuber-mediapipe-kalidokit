@@ -29,7 +29,10 @@ export const AVATAR_CATALOG = [
   },
 ];
 
+export function getAvatarEntry(avatarId) {
+  return AVATAR_CATALOG.find((a) => a.id === avatarId) ?? AVATAR_CATALOG[0];
+}
+
 export function getAvatarModelPath(avatarId) {
-  const entry = AVATAR_CATALOG.find((a) => a.id === avatarId);
-  return entry?.modelPath ?? AVATAR_CATALOG[0].modelPath;
+  return getAvatarEntry(avatarId).modelPath;
 }

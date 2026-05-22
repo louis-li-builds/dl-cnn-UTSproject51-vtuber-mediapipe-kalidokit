@@ -1,0 +1,48 @@
+{
+  "modelUrl": "/assets/models/gesture/hagrid_exp02_vgg_inline.onnx",
+  "experiment": "Set A — Exp02 VGGStyleCNN",
+  "imgSize": 224,
+  "normalize": {
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225]
+  },
+  "classNames": [
+    "call",
+    "dislike",
+    "fist",
+    "four",
+    "like",
+    "mute",
+    "ok",
+    "one",
+    "palm",
+    "peace",
+    "rock",
+    "stop"
+  ],
+  "inferenceIntervalMs": 150,
+  "minConfidence": 0.45,
+  "stableFrames": 3,
+  "cropMargin": 0.08,
+  "preferHand": "right",
+  "poseOverride": {
+    "enabled": true,
+    "useStableLabel": true,
+    "minConfidence": 0.5,
+    "lockWrist": true,
+    "gestures": [
+      "fist",
+      "palm",
+      "peace",
+      "one",
+      "four",
+      "ok",
+      "rock",
+      "stop",
+      "like",
+      "call",
+      "dislike",
+      "mute"
+    ]
+  }
+}

@@ -1,17 +1,90 @@
 const VIDEO_PROFILES = {
-  /** Default balance */
   standard: { width: { ideal: 1280 }, height: { ideal: 720 } },
-  /** Larger frame if the camera / browser honours it (not optical wide-angle). */
   wide: { width: { ideal: 1920 }, height: { ideal: 1080 } },
-  /** Lighter CPU / bandwidth */
   compact: { width: { ideal: 640 }, height: { ideal: 480 } },
 };
+
+const heldStreams = new Set();
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function applyVideoVisualStyle(video, { objectFit = "contain", digitalZoom = 1 }) {
   video.style.objectFit = objectFit;
   const z = Math.max(0.72, Math.min(1, digitalZoom));
   video.style.transformOrigin = "center center";
   video.style.transform = `scaleX(-1) scale(${z})`;
+}
+
+export function releaseAllWebcamTracks() {
+  for (const stream of heldStreams) {
+    stream.getTracks().forEach((t) => t.stop());
+  }
+  heldStreams.clear();
+}
+
+function trackStream(stream) {
+  if (stream) heldStreams.add(stream);
+}
+
+export function stopWebcamStream(stream) {
+  if (!stream) return;
+  stream.getTracks().forEach((t) => t.stop());
+  heldStreams.delete(stream);
+}
+
+function buildAttempts(profileKey) {
+  const key = VIDEO_PROFILES[profileKey] ? profileKey : "compact";
+  return [
+    { video: { ...VIDEO_PROFILES[key], facingMode: "user" } },
+    { video: { ...VIDEO_PROFILES.compact, facingMode: "user" } },
+    { video: { facingMode: "user" } },
+    { video: true },
+  ];
+}
+
+export async function acquireWebcamStream(profileKey = "compact", options = {}) {
+  const warmupMs = options.warmupMs ?? 250;
+  const maxAttempts = options.maxAttempts ?? 4;
+  const attempts = buildAttempts(profileKey);
+
+  releaseAllWebcamTracks();
+  await delay(warmupMs);
+
+  let lastError = null;
+  for (let round = 0; round < maxAttempts; round += 1) {
+    for (const constraints of attempts) {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          ...constraints,
+          audio: false,
+        });
+        trackStream(stream);
+        return stream;
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    releaseAllWebcamTracks();
+    await delay(300 + round * 200);
+  }
+
+  throw new Error(
+    `${lastError?.name ?? "Error"}: ${lastError?.message ?? "getUserMedia failed"}`
+  );
+}
+
+async function bindStreamToVideo(video, stream) {
+  video.srcObject = stream;
+  await new Promise((resolve) => {
+    if (video.readyState >= 1) {
+      resolve();
+      return;
+    }
+    video.onloadedmetadata = () => resolve();
+  });
+  await video.play();
 }
 
 export async function initWebcam(mountElement, options = {}) {
@@ -22,55 +95,31 @@ export async function initWebcam(mountElement, options = {}) {
   mountElement.innerHTML = "";
 
   const stage = document.createElement("div");
-  stage.style.position = "relative";
-  stage.style.display = "flex";
-  stage.style.alignItems = "center";
-  stage.style.justifyContent = "center";
-  stage.style.lineHeight = "0";
-  stage.style.width = "100%";
-  stage.style.height = "100%";
-  stage.style.minHeight = "0";
-  stage.style.overflow = "hidden";
+  stage.style.cssText =
+    "position:relative;display:flex;align-items:center;justify-content:center;width:100%;height:100%;min-height:0;overflow:hidden;line-height:0";
 
   const video = document.createElement("video");
   video.autoplay = true;
   video.muted = true;
   video.playsInline = true;
-  video.style.display = "block";
-  video.style.width = "100%";
-  video.style.height = "auto";
-  video.style.maxWidth = "100%";
-  video.style.maxHeight = "100%";
-  video.style.borderRadius = "10px";
-  video.style.background = "#000";
+  video.setAttribute("playsinline", "");
+  video.style.cssText =
+    "display:block;width:100%;height:auto;max-width:100%;max-height:100%;border-radius:10px;background:#000";
 
-  const profileKey = options.videoProfile ?? "standard";
-  const visual = {
+  const profileKey = options.videoProfile ?? "compact";
+  applyVideoVisualStyle(video, {
     objectFit: options.objectFit ?? "contain",
     digitalZoom: options.digitalZoom ?? 1,
-  };
-  applyVideoVisualStyle(video, visual);
+  });
 
   stage.appendChild(video);
   mountElement.appendChild(stage);
 
-  const videoConstraints = {
-    ...VIDEO_PROFILES[profileKey],
-    facingMode: "user",
-  };
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: videoConstraints,
-    audio: false,
+  const stream = await acquireWebcamStream(profileKey, {
+    warmupMs: options.warmupMs,
+    maxAttempts: options.maxAttempts,
   });
-
-  video.srcObject = stream;
-
-  await new Promise((resolve) => {
-    video.onloadedmetadata = () => resolve();
-  });
-
-  await video.play();
+  await bindStreamToVideo(video, stream);
 
   return {
     video,
@@ -78,43 +127,11 @@ export async function initWebcam(mountElement, options = {}) {
     container: mountElement,
     stage,
     profileKey,
-    setVisual(partial) {
-      if (partial.objectFit !== undefined) visual.objectFit = partial.objectFit;
-      if (partial.digitalZoom !== undefined) visual.digitalZoom = partial.digitalZoom;
-      applyVideoVisualStyle(video, visual);
+    stop() {
+      stopWebcamStream(stream);
+      video.srcObject = null;
     },
   };
-}
-
-export function stopWebcamStream(stream) {
-  if (!stream) return;
-  stream.getTracks().forEach((t) => t.stop());
-}
-
-/**
- * Hot-swap camera resolution profile. Caller must restart tracking if needed.
- */
-export async function restartWebcamStream(video, oldStream, profileKey) {
-  stopWebcamStream(oldStream);
-
-  const key = VIDEO_PROFILES[profileKey] ? profileKey : "standard";
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: {
-      ...VIDEO_PROFILES[key],
-      facingMode: "user",
-    },
-    audio: false,
-  });
-
-  video.srcObject = stream;
-
-  await new Promise((resolve) => {
-    video.onloadedmetadata = () => resolve();
-  });
-
-  await video.play();
-
-  return { stream, profileKey: key };
 }
 
 export { VIDEO_PROFILES };
