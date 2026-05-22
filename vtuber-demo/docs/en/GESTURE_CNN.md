@@ -2,17 +2,11 @@
 
 The live demo loads **Exp02 (VGGStyleCNN)** exported to ONNX. Holistic tracking and VRM rendering stay on the main frame loop (~30 FPS). Gesture classification runs on a **throttled side path** (default ~10 inferences per second; see `gesture-model.json`) so the UI stays responsive. Hand crops use **fused HandLandmarker + Holistic** landmarks when the dedicated model loads (tighter bbox than Holistic-only hands). ONNX Runtime tries **WebGPU** first, then falls back to **WASM**.
 
-## Export ONNX from training weights
+## Bundled model
 
-From the project training environment, export **Set A Exp02** weights (e.g. `best_weights.pt` from training) into the demo assets folder:
+The public repo ships **`hagrid_exp02_vgg_inline.onnx`** (~14 MB, weights embedded) under `vtuber-demo/assets/models/gesture/`. Re-export from your own training weights (e.g. `best_weights.pt`) is a **local/offline** step—not part of this repository.
 
-```bash
-python scripts/export_hagrid_onnx.py \
-  --weights path/to/best_weights.pt \
-  --output vtuber-demo/assets/models/gesture/hagrid_exp02_vgg.onnx
-```
-
-The web demo uses **`hagrid_exp02_vgg_inline.onnx`** (~14 MB, weights embedded). A small `hagrid_exp02_vgg.onnx` + `.onnx.data` split may exist from export; **browser ORT cannot load the split** (`MountedFiles is not available`) — use the `_inline` file or re-run `scripts/export_hagrid_onnx.py` (it writes `_inline` automatically when `onnx` is installed).
+A split `hagrid_exp02_vgg.onnx` + `.onnx.data` export may exist from some toolchains; **browser ORT cannot load the split** (`MountedFiles is not available`) — use the `_inline` artifact in the demo folder.
 
 Defaults match Set A: 224×224 input, ImageNet normalization, 12 HaGRID classes.
 

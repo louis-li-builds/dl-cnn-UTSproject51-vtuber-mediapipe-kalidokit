@@ -20,6 +20,9 @@ build/
 .vite/
 .next/
 
+# local export / training scripts (not public)
+scripts/
+
 # training checkpoints (not shipped in this repo)
 *.pth
 *.onnx.data
