@@ -83,6 +83,17 @@ function posePeace(side) {
   };
 }
 
+/** Scissors / ✌️ — stronger thumb tuck than peace for VRM rigs that need more metacarpal curl. */
+function poseScissors(side) {
+  return {
+    thumb: makeThumbCurlPose(side, 0.88),
+    index: makeFingerOpenPose(),
+    middle: makeFingerOpenPose(),
+    ring: makeFingerCurlPose(side, 1),
+    little: makeFingerCurlPose(side, 1),
+  };
+}
+
 function poseOne(side) {
   return {
     thumb: makeThumbCurlPose(side, 0.6),
@@ -166,8 +177,8 @@ const POSE_BY_GESTURE = {
   rock: poseFist,
   palm: posePalm,
   paper: posePalm,
-  peace: posePeace,
-  scissors: posePeace,
+  peace: poseScissors,
+  scissors: poseScissors,
   one: poseOne,
   four: poseFour,
   ok: poseOk,

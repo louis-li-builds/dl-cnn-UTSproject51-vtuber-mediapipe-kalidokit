@@ -1,6 +1,6 @@
 # Set A gesture CNN (Exp02) — browser integration
 
-The live demo loads **Exp02 (VGGStyleCNN)** exported to ONNX. Holistic tracking and VRM rendering stay on the main frame loop (~30 FPS). Gesture classification runs on a **throttled side path** (~5 inferences per second) so the UI remains responsive.
+The live demo loads **Exp02 (VGGStyleCNN)** exported to ONNX. Holistic tracking and VRM rendering stay on the main frame loop (~30 FPS). Gesture classification runs on a **throttled side path** (default ~10 inferences per second; see `gesture-model.json`) so the UI stays responsive. Hand crops use **fused HandLandmarker + Holistic** landmarks when the dedicated model loads (tighter bbox than Holistic-only hands). ONNX Runtime tries **WebGPU** first, then falls back to **WASM**.
 
 ## Export ONNX from training weights
 
@@ -12,7 +12,7 @@ python scripts/export_hagrid_onnx.py \
   --output vtuber-demo/assets/models/gesture/hagrid_exp02_vgg.onnx
 ```
 
-A pre-exported `hagrid_exp02_vgg.onnx` may already be present in the repository for team demos (~50 KB).
+The web demo uses **`hagrid_exp02_vgg_inline.onnx`** (~14 MB, weights embedded). A small `hagrid_exp02_vgg.onnx` + `.onnx.data` split may exist from export; **browser ORT cannot load the split** (`MountedFiles is not available`) — use the `_inline` file or re-run `scripts/export_hagrid_onnx.py` (it writes `_inline` automatically when `onnx` is installed).
 
 Defaults match Set A: 224×224 input, ImageNet normalization, 12 HaGRID classes.
 
@@ -41,8 +41,9 @@ Edit `assets/models/gesture/gesture-model.json`:
 
 | Field | Typical range | Effect |
 |-------|----------------|--------|
-| `inferenceIntervalMs` | 150–250 | CNN rate (lower = more load) |
-| `stableFrames` | 2–4 | Reduces label flicker |
+| `inferenceIntervalMs` | 80–150 | CNN rate (lower = more load; needs WebGPU or fast WASM) |
+| `stableFrames` | 1–3 | Reduces label flicker (higher = slower label commits) |
 | `minConfidence` | 0.4–0.6 | Ignores weak predictions |
+| `poseOverride.useStableLabel` | `true` / `false` | `false` = react to raw CNN label (faster; raise `minConfidence` to tame flicker) |
 | `cropMargin` | 0.08 (match training PAD) | Hand crop size |
 | `preferHand` | `"right"` or `"left"` | Classify one hand only |

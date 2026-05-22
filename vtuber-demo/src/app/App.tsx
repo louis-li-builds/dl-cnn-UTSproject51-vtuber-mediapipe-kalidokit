@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useCallback, useState } from 'react';
 import { AvatarSelector } from './components/AvatarSelector';
 import { WebcamPreview } from './components/WebcamPreview';
 import { AvatarDisplay } from './components/AvatarDisplay';
@@ -23,6 +23,14 @@ export default function App() {
   const [isPrimaryViewAvatar, setIsPrimaryViewAvatar] = useState(true);
   const [webcamMount, setWebcamMount] = useState<HTMLElement | null>(null);
   const [avatarMount, setAvatarMount] = useState<HTMLElement | null>(null);
+
+  const handleWebcamMount = useCallback((el: HTMLElement | null) => {
+    setWebcamMount(el);
+  }, []);
+
+  const handleAvatarMount = useCallback((el: HTMLElement | null) => {
+    setAvatarMount(el);
+  }, []);
 
   const runtime = useRuntimeStore();
   useVtuberPipeline(webcamMount, avatarMount, selectedAvatarId);
@@ -81,7 +89,7 @@ export default function App() {
               <WebcamPreview
                 isPrimary={!isPrimaryViewAvatar}
                 onSwapView={handleSwapView}
-                onMountReady={setWebcamMount}
+                onMountReady={handleWebcamMount}
               />
             </div>
             <div
@@ -92,7 +100,7 @@ export default function App() {
               <AvatarDisplay
                 isPrimary={isPrimaryViewAvatar}
                 onSwapView={handleSwapView}
-                onMountReady={setAvatarMount}
+                onMountReady={handleAvatarMount}
               />
             </div>
           </div>

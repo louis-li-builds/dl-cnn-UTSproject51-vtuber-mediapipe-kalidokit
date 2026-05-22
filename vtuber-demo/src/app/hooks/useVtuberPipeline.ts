@@ -17,7 +17,7 @@ export function useVtuberPipeline(
 
     let cancelled = false;
 
-    bootVtuberPipeline({
+    void bootVtuberPipeline({
       webcamMount,
       avatarMount,
       avatarId: avatarIdRef.current,
@@ -27,7 +27,6 @@ export function useVtuberPipeline(
         return;
       }
       pipelineRef.current = api;
-      void api.setAvatarId(avatarIdRef.current);
     });
 
     return () => {
@@ -38,6 +37,8 @@ export function useVtuberPipeline(
   }, [webcamMount, avatarMount]);
 
   useEffect(() => {
-    void pipelineRef.current?.setAvatarId(avatarId);
+    const api = pipelineRef.current;
+    if (!api) return;
+    void api.setAvatarId(avatarId);
   }, [avatarId]);
 }

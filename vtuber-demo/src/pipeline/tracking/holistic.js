@@ -1,4 +1,8 @@
 import { buildTrackingResult } from "./trackingResult.js";
+import { createDedicatedHandTracker } from "./handLandmarker.js";
+import { resetHandLandmarkHold } from "./handLandmarkHold.js";
+import { resetHandSlotStabilizer } from "./handSlotStabilizer.js";
+import { resetSoloHandLatch } from "./soloHandLatch.js";
 
 const TASKS_VISION_URL =
   "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.34/vision_bundle.mjs";
@@ -99,7 +103,7 @@ export async function initHolisticTracking({
   if (!stage) throw new Error("Tracking stage is required.");
 
   const vision = await import(/* @vite-ignore */ TASKS_VISION_URL);
-  const { FilesetResolver, HolisticLandmarker } = vision;
+  const { FilesetResolver, HolisticLandmarker, HandLandmarker } = vision;
 
   const filesetResolver = await FilesetResolver.forVisionTasks(WASM_ROOT);
 
@@ -114,6 +118,24 @@ export async function initHolisticTracking({
       outputFaceBlendshapes: false,
     }
   );
+
+  let dedicatedHandTracker = null;
+  if (HandLandmarker) {
+    try {
+      dedicatedHandTracker = await createDedicatedHandTracker({
+        filesetResolver,
+        HandLandmarker,
+      });
+      onLog?.(
+        "Dedicated HandLandmarker active (fused with Holistic for hands / gesture crop)."
+      );
+    } catch (error) {
+      console.warn("[holistic] HandLandmarker disabled:", error);
+      onLog?.(
+        `HandLandmarker unavailable; using Holistic hands only. (${error?.message ?? error})`
+      );
+    }
+  }
 
   const canvas = createOverlayCanvas(stage);
   const ctx = canvas.getContext("2d");
@@ -130,6 +152,8 @@ export async function initHolisticTracking({
 
   let lastVideoTime = -1;
   let rafId = null;
+  let lastHolisticLogMs = -Infinity;
+  const HOLISTIC_LOG_INTERVAL_MS = 2500;
 
   function renderFrame() {
     if (video.readyState < 2) {
@@ -145,7 +169,11 @@ export async function initHolisticTracking({
       const nowMs = performance.now();
       const opts = mergeTrackingOpts(trackingOptions, getTrackingOptions);
       const mirrorInference = opts.mirrorInference !== false;
-      const buildOpts = { swapHandSides: Boolean(opts.swapHandSides) };
+      const buildOpts = {
+        swapHandSides: Boolean(opts.swapHandSides),
+        mirrorInference,
+        invertMirroredHandedness: opts.invertMirroredHandedness !== false,
+      };
 
       setOverlayMirrorStyle(canvas, mirrorInference);
 
@@ -197,7 +225,19 @@ export async function initHolisticTracking({
       }
 
       const rawResult = holisticLandmarker.detectForVideo(detectSource, nowMs);
-      const trackingResult = buildTrackingResult(rawResult, nowMs, buildOpts);
+      let handResult = null;
+      if (dedicatedHandTracker) {
+        try {
+          handResult = dedicatedHandTracker.detect(detectSource, nowMs);
+        } catch (error) {
+          console.warn("[holistic] HandLandmarker detect failed:", error);
+        }
+      }
+      const trackingResult = buildTrackingResult(
+        { holisticResult: rawResult, handResult },
+        nowMs,
+        buildOpts
+      );
 
       const face = trackingResult.face.landmarks;
       const pose = trackingResult.pose.landmarks;
@@ -212,10 +252,15 @@ export async function initHolisticTracking({
       drawPoints(ctx, rightHand, "#FF69B4", 3);
 
       if (onFrame) {
-        onFrame(trackingResult);
+        try {
+          onFrame(trackingResult);
+        } catch (error) {
+          console.error("[holistic] onFrame failed:", error);
+        }
       }
 
-      if (onLog) {
+      if (onLog && nowMs - lastHolisticLogMs >= HOLISTIC_LOG_INTERVAL_MS) {
+        lastHolisticLogMs = nowMs;
         const det =
           detectSource === video
             ? `${video.videoWidth}×${video.videoHeight}`
@@ -223,12 +268,7 @@ export async function initHolisticTracking({
               ? `${flipFullCanvas.width}×${flipFullCanvas.height} (mirror full)`
               : `${detectCanvas.width}×${detectCanvas.height} (maxW=${detectMaxWidth})`;
         onLog(
-          "Holistic tracking active.\n" +
-            `Detection source: ${det} mirrorInference=${mirrorInference}\n` +
-            `Face landmarks: ${face.length}\n` +
-            `Pose landmarks: ${pose.length}\n` +
-            `Left hand landmarks: ${leftHand.length}\n` +
-            `Right hand landmarks: ${rightHand.length}`
+          `active src=${det} mirror=${mirrorInference} face=${face.length} pose=${pose.length} L=${leftHand.length} R=${rightHand.length}`
         );
       }
     }
@@ -247,6 +287,11 @@ export async function initHolisticTracking({
       if (typeof holisticLandmarker?.close === "function") {
         holisticLandmarker.close();
       }
+      void dedicatedHandTracker?.close?.();
+      dedicatedHandTracker = null;
+      resetHandSlotStabilizer();
+      resetHandLandmarkHold();
+      resetSoloHandLatch();
     },
   };
 }

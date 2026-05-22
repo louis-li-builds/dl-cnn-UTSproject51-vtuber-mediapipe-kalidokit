@@ -93,7 +93,7 @@ const LOWER_ARM_SIDE_Y_SCALE = 2.0;
 const LOWER_ARM_SIDE_Z_SCALE = 1.3;
 const LOWER_ARM_LEFT_LIFT_OFFSET = 0.6;
 const LOWER_ARM_RIGHT_LIFT_OFFSET = 0.6;
-const LOWER_ARM_ELBOW_BEND_SCALE = 0.45;
+const LOWER_ARM_ELBOW_BEND_SCALE = 0.58;
 
 function getLowerArmRotation(motionState, side) {
   const body = motionState.upper_body ?? {};

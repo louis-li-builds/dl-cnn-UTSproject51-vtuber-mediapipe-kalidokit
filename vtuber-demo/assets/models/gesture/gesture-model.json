@@ -1,5 +1,5 @@
 {
-  "modelUrl": "./assets/models/gesture/hagrid_exp02_vgg.onnx",
+  "modelUrl": "./assets/models/gesture/hagrid_exp02_vgg_inline.onnx",
   "experiment": "Set A — Exp02 VGGStyleCNN",
   "imgSize": 224,
   "normalize": {
@@ -20,15 +20,16 @@
     "rock",
     "stop"
   ],
-  "inferenceIntervalMs": 200,
-  "minConfidence": 0.45,
+  "inferenceIntervalMs": 100,
+  "minConfidence": 0.5,
   "stableFrames": 3,
   "cropMargin": 0.08,
-  "preferHand": "right",
+  "preferHand": "both",
+  "inferenceBothHands": true,
   "poseOverride": {
     "enabled": true,
     "useStableLabel": true,
-    "minConfidence": 0.5,
+    "minConfidence": 0.6,
     "lockWrist": true,
     "gestures": [
       "fist",

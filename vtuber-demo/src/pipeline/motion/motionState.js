@@ -63,7 +63,13 @@ function calculateAngle3D(a, b, c) {
   return radians * (180 / Math.PI);
 }
 
-function calculateElbowAngle(poseLandmarks, side) {
+/**
+ * Elbow flex angle (shoulder–elbow–wrist). When `handWristLandmarks` is provided and has a
+ * wrist (index 0), use that point instead of the **pose** wrist (15/16). Pose wrists are often
+ * wrong or stuck when the forearm reaches the face (“hand supporting head”); hand landmarks
+ * stay on the actual palm.
+ */
+function calculateElbowAngle(poseLandmarks, side, handWristLandmarks = null) {
   if (!poseLandmarks || poseLandmarks.length === 0) {
     return null;
   }
@@ -86,7 +92,18 @@ function calculateElbowAngle(poseLandmarks, side) {
 
   const shoulder = poseLandmarks[idx.shoulder];
   const elbow = poseLandmarks[idx.elbow];
-  const wrist = poseLandmarks[idx.wrist];
+  const poseWrist = poseLandmarks[idx.wrist];
+
+  const handWrist =
+    handWristLandmarks &&
+    handWristLandmarks.length > 0 &&
+    handWristLandmarks[0] &&
+    elbow
+      ? handWristLandmarks[0]
+      : null;
+
+  /** Prefer tracked hand wrist — pose wrist is often wrong when the forearm reaches the face. */
+  const wrist = handWrist ?? poseWrist;
 
   return calculateAngle3D(shoulder, elbow, wrist);
 }
@@ -392,8 +409,16 @@ export function buildMotionState(trackingResult, video = null) {
   const leftHand = solveHand(leftHandLandmarks, leftHandWorldLandmarks, "left");
   const rightHand = solveHand(rightHandLandmarks, rightHandWorldLandmarks, "right");
 
-  const leftElbowAngle = calculateElbowAngle(poseLandmarks, "left");
-  const rightElbowAngle = calculateElbowAngle(poseLandmarks, "right");
+  const leftElbowAngle = calculateElbowAngle(
+    poseLandmarks,
+    "left",
+    leftHandLandmarks.length > 0 ? leftHandLandmarks : null
+  );
+  const rightElbowAngle = calculateElbowAngle(
+    poseLandmarks,
+    "right",
+    rightHandLandmarks.length > 0 ? rightHandLandmarks : null
+  );
 
   return {
     timestamp: trackingResult.timestamp,

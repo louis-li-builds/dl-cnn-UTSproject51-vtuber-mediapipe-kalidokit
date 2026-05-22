@@ -24,8 +24,8 @@ Runtime tuning: `public/demo-config.json` (served as `/demo-config.json`) — se
 vtuber-demo/
 ├─ index.html                 # Vite entry (root div)
 ├─ public/
-│  ├─ demo-config.json        # Runtime tuning (mirrored in repo root demo-config.json)
-│  └─ assets -> ../assets     # Symlink: VRM + gesture ONNX
+│  └─ demo-config.json        # Runtime tuning (mirrored in repo root demo-config.json)
+├─ vite.config.ts             # Serves `assets/` at `/assets/*` in dev; copies into `dist/assets` on build
 ├─ src/
 │  ├─ main.tsx                # React bootstrap
 │  ├─ app/                    # Figma UI shell
@@ -37,7 +37,7 @@ vtuber-demo/
 │     ├─ forward/
 │     ├─ avatar/
 │     └─ render/
-└─ assets/models/             # VRM + gesture assets (also linked from public/)
+└─ assets/models/             # VRM + gesture ONNX (URL `/assets/...`; align with `feature/figma-ui-integrated` for extra VRMs)
 ```
 
 ---

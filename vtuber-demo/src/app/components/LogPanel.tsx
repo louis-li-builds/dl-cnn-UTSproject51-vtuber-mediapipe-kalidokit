@@ -1,5 +1,5 @@
 import { Terminal, Trash2, Download } from 'lucide-react';
-import { patchRuntime } from '../../pipeline/runtimeStore.js';
+import { clearSystemLog } from '../../pipeline/systemLog.js';
 
 interface LogPanelProps {
   logText: string;
@@ -7,7 +7,7 @@ interface LogPanelProps {
 
 export function LogPanel({ logText }: LogPanelProps) {
   const clearLogs = () => {
-    patchRuntime({ logText: '' });
+    clearSystemLog();
   };
 
   const downloadLogs = () => {

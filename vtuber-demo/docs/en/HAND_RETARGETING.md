@@ -5,28 +5,29 @@ If the **webcam overlay** matches your hands but the **3D avatar** does not, the
 ## What we use
 
 1. **[Kalidokit](https://github.com/yeemachine/kalidokit) `Hand.solve`** — per-finger joint angles from 21 MediaPipe landmarks (same family as Kalidoface).
-2. **Holistic `leftHandWorldLandmarks` / `rightHandWorldLandmarks`** — palm normal for wrist pitch/yaw (see [MediaPipe holistic z-axis note](https://github.com/google/mediapipe/issues/3810)).
+2. **Holistic `leftHandWorldLandmarks` / `rightHandWorldLandmarks`** — when the dedicated **HandLandmarker** fused in `holistic.js` is active, these slots prefer **HandLandmarker world landmarks**; otherwise Holistic world data is used for palm normal / wrist (see [MediaPipe holistic z-axis note](https://github.com/google/mediapipe/issues/3810)).
 3. **Per-bone VRM finger chain** — thumb metacarpal + proximal/distal; index–little proximal/intermediate/distal (ported from teammate skeleton demo).
+4. **Elbow angle for lower arm (fallback)** — when that **side’s hand** is tracked, elbow flex uses **shoulder–elbow–hand wrist (landmark 0)** instead of the **pose** wrist (15/16), so forearm bend stays plausible when the pose wrist is occluded or stuck (e.g. hand at the face).
 
 ## Tuning
 
 | File | Knob |
 |------|------|
-| `src/tracking/trackingResult.js` | `TRACKING_SWAP_HAND_SIDES` — set `true` if left/right are swapped on the avatar only |
-| `src/avatar/vrmMapper.js` | `LOWER_ARM_*` scales — forearm follow vs stability |
-| `src/motion/handPose.js` | `calibrateWrist()` gains — wrist orientation strength |
+| `demo-config.json` → `tracking.swapHandSides` | Applied **after** wrist-based matching: **`true`** swaps the final `hands.left` / `hands.right` blocks. Use if your rig still mirrors the wrong arm. Skeleton used a fixed equivalent of `true`; we default `false` and rely on Holistic wrist anchors first. |
+| `src/pipeline/avatar/vrmMapper.js` | `LOWER_ARM_*` scales — forearm follow vs stability |
+| `src/pipeline/motion/handPose.js` | `calibrateWrist()` gains — wrist orientation strength |
 
 ## CNN pose override (same idea as teammate RPS demo)
 
-When Exp02 reports a **stable** class above `poseOverride.minConfidence`, the avatar uses a **fixed finger pose** from `src/avatar/gestureFingerPoses.js` and **locks the wrist** (no landmark wrist spin). This matches how the skeleton demo maps `activeGesture` → `makeRpsFixedFingerPose` for rock / paper / scissors.
+When Exp02 reports a class above `poseOverride.minConfidence`, the avatar uses a **fixed finger pose** from `gestureFingerPoses.js` and **locks the wrist** (no landmark wrist spin). With `poseOverride.useStableLabel: false`, the label reacts faster to the raw CNN output (tune confidence to reduce flicker).
 
 Configure in `assets/models/gesture/gesture-model.json`:
 
 ```json
 "poseOverride": {
   "enabled": true,
-  "minConfidence": 0.5,
-  "stableFrames": 3,
+  "useStableLabel": false,
+  "minConfidence": 0.58,
   "gestures": ["fist", "palm", "peace", ...]
 }
 ```

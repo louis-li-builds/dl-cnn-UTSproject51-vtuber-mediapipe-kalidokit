@@ -113,3 +113,31 @@ export function pickHandForGesture(trackingResult, preferHand = "right") {
   if (left?.detected) return { side: "left", landmarks: left.landmarks };
   return null;
 }
+
+/** @returns {boolean} */
+export function shouldClassifyBothHands(config) {
+  return (
+    config?.inferenceBothHands === true ||
+    config?.preferHand === "both"
+  );
+}
+
+/**
+ * Next hand to classify when alternating both sides (one ONNX run per throttle tick).
+ * @param {object} trackingResult
+ * @param {"left"|"right"} lastSide
+ */
+export function pickHandSideForAlternatingInference(trackingResult, lastSide) {
+  const order =
+    lastSide === "left"
+      ? ["right", "left"]
+      : ["left", "right"];
+
+  for (const side of order) {
+    const hand = trackingResult?.hands?.[side];
+    if (hand?.detected && hand.landmarks?.length) {
+      return { side, landmarks: hand.landmarks };
+    }
+  }
+  return null;
+}

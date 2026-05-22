@@ -4,18 +4,26 @@
   },
   "tracking": {
     "swapHandSides": false,
-    "mirrorInference": true
+    "mirrorInference": true,
+    "invertMirroredHandedness": true
   },
   "webcam": {
     "videoProfile": "standard",
     "objectFit": "contain",
     "digitalZoom": 1
   },
+  "scene": {
+    "cameraFov": 40,
+    "cameraDistance": 3.25,
+    "cameraHeight": 1.12,
+    "lookAtY": 1.02,
+    "avatarScale": 0.88
+  },
   "smoothing": {
     "mode": "oneEuro",
     "alpha": 0.3,
     "oneEuro": {
-      "minCutoff": 1.0,
+      "minCutoff": 0.8,
       "beta": 0.012,
       "dCutoff": 1.0
     }

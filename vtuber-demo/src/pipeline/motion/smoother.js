@@ -44,12 +44,20 @@ function smoothRotLerp(prevRot, nextRot, alpha) {
   };
 }
 
-function smoothHandLerp(prevHand, nextHand, alpha) {
+const HAND_DETECT_HOLD_MS_LERP = 220;
+
+function smoothHandLerp(prevHand, nextHand, alpha, nowMs = performance.now()) {
+  const lastSeenMs = prevHand?._lastSeenMs ?? 0;
+
   if (!nextHand || !nextHand.detected) {
+    if (prevHand?.detected && nowMs - lastSeenMs < HAND_DETECT_HOLD_MS_LERP) {
+      return { ...prevHand, detected: true, _lastSeenMs: lastSeenMs };
+    }
     return {
       detected: false,
       ...createEmptyHandState(),
       raw: null,
+      _lastSeenMs: 0,
     };
   }
 
@@ -57,6 +65,7 @@ function smoothHandLerp(prevHand, nextHand, alpha) {
 
   return {
     ...nextHand,
+    _lastSeenMs: nowMs,
     wrist_angle: smoothNumberLerp(prevHand.wrist_angle, nextHand.wrist_angle, alpha),
     wrist_rot: smoothRotLerp(
       prevHand.wrist_rot ?? createEmptyRot(),
@@ -136,13 +145,22 @@ export function createMotionSmoother(config = {}) {
     };
   }
 
+  const HAND_DETECT_HOLD_MS = 220;
+
   function smoothHandEuro(prefix, prevHand, nextHand, tSec) {
+    const nowMs = tSec * 1000;
+    const lastSeenMs = prevHand?._lastSeenMs ?? 0;
+
     if (!nextHand || !nextHand.detected) {
+      if (prevHand?.detected && nowMs - lastSeenMs < HAND_DETECT_HOLD_MS) {
+        return { ...prevHand, detected: true, _lastSeenMs: lastSeenMs };
+      }
       resetPrefix(`${prefix}.`);
       return {
         detected: false,
         ...createEmptyHandState(),
         raw: null,
+        _lastSeenMs: 0,
       };
     }
 
@@ -150,6 +168,7 @@ export function createMotionSmoother(config = {}) {
 
     return {
       ...nextHand,
+      _lastSeenMs: nowMs,
       wrist_angle: smoothScalarEuro(`${prefix}.wrist_angle`, prevHand.wrist_angle, nextHand.wrist_angle, tSec),
       wrist_rot: smoothRotEuro(`${prefix}.wrist_rot`, prevHand.wrist_rot, nextHand.wrist_rot, tSec),
       palm_open: smoothScalarEuro(`${prefix}.palm_open`, prevHand.palm_open, nextHand.palm_open, tSec),
@@ -242,8 +261,14 @@ export function createMotionSmoother(config = {}) {
       alpha
     );
 
-    state.hands.left = smoothHandLerp(state.hands.left, motionState.hands.left, alpha);
-    state.hands.right = smoothHandLerp(state.hands.right, motionState.hands.right, alpha);
+    const nowMs = (motionState?.timestamp ?? performance.now());
+    state.hands.left = smoothHandLerp(state.hands.left, motionState.hands.left, alpha, nowMs);
+    state.hands.right = smoothHandLerp(
+      state.hands.right,
+      motionState.hands.right,
+      alpha,
+      nowMs
+    );
 
     return mergeMotion(motionState);
   }
