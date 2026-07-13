@@ -37,8 +37,8 @@ The repo root holds optional npm metadata; **always run the demo from `vtuber-de
 ## Quick start
 
 ```bash
-git clone https://github.com/LouisLi1020/dl-cnn-UTSproject52-vtuber-mediapipe-kalidokit.git
-cd dl-cnn-UTSproject52-vtuber-mediapipe-kalidokit/vtuber-demo
+git clone https://github.com/louis-li-builds/dl-cnn-UTSproject51-vtuber-mediapipe-kalidokit.git
+cd dl-cnn-UTSproject51-vtuber-mediapipe-kalidokit/vtuber-demo
 npm install
 npm start
 ```

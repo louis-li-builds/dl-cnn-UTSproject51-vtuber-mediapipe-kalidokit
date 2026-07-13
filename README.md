@@ -1,5 +1,9 @@
 # DL/CNN VTuber Demo
 
+**UTS Deep Learning coursework** — browser VTuber motion capture with optional gesture CNN.
+
+**Author:** Cheng-Yi (Louis) Li · [Portfolio context](PORTFOLIO.md)
+
 **[Full guide (English)](docs/en/README.md)** · **[完整說明（繁體中文）](docs/zh-TW/README.md)** · [Documentation hub](docs/README.md)
 
 [![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=000)](https://developer.mozilla.org/en-US/docs/Web/JavaScript)
@@ -34,3 +38,7 @@ npm start
 ```
 
 Open the URL shown (often `http://localhost:3000`), allow webcam access. You should see the mirrored camera with landmarks, the VRM avatar, motion readouts, and a short status log.
+
+## License
+
+MIT · see [LICENSE](LICENSE)
